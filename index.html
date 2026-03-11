@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>皮克敏蘑菇重生推算器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-image"></div>
+
+    <div class="page">
+      <div class="topbar">
+        <div class="title-block">
+          <h1>皮克敏蘑菇重生推算器</h1>
+        </div>
+
+        <div class="status-cards">
+          <div class="time-card">
+            <div class="time-card-label">目前台北時間</div>
+            <div class="time-card-value" id="taipei-now">—</div>
+          </div>
+
+          <div class="next-card">
+            <div class="time-card-label">即將冒出來的蘑菇</div>
+            <div class="next-card-line" id="next-mushroom-name">地點：—</div>
+            <div class="next-card-line" id="next-mushroom-time">
+              重生時間：—（—）
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel tag-panel">
+        <div class="panel-header panel-header-compact">
+          <div>
+            <h2>地點標籤</h2>
+            <p>
+              單筆按「加入標籤」後會記住地點。點一下標籤，可直接填入最新新增那一列。
+            </p>
+          </div>
+        </div>
+        <div class="tag-list" id="tag-list">
+          <div class="empty-tags" id="empty-tags">目前還沒有標籤</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>蘑菇清單</h2>
+            <p>先輸入地點與剩餘時間，系統會從您輸入當下那一秒開始倒數。</p>
+          </div>
+
+          <div class="header-actions">
+            <div
+              class="alert-setting alert-toggle-setting"
+              id="lead-alert-setting"
+            >
+              <label class="alert-toggle" for="lead-alert-enabled">
+                <input type="checkbox" id="lead-alert-enabled" />
+                <span>提前提醒</span>
+              </label>
+              <div class="alert-setting-control">
+                <input
+                  type="number"
+                  id="lead-seconds-input"
+                  min="1"
+                  max="60"
+                  step="1"
+                  inputmode="numeric"
+                />
+                <span>秒前</span>
+              </div>
+            </div>
+
+            <div
+              class="alert-setting alert-toggle-setting"
+              id="frequent-reminder-setting"
+            >
+              <label class="alert-toggle" for="frequent-reminder-enabled">
+                <input type="checkbox" id="frequent-reminder-enabled" />
+                <span>頻繁提醒（每 5 秒）</span>
+              </label>
+            </div>
+
+            <div class="alert-setting sound-setting">
+              <div class="alert-setting-label">音效音量</div>
+              <div class="alert-setting-control sound-setting-control">
+                <input
+                  type="range"
+                  id="alert-volume-input"
+                  min="0"
+                  max="100"
+                  step="1"
+                />
+                <span id="alert-volume-text">130%</span>
+              </div>
+            </div>
+
+            <button class="btn-outline" id="sort-btn">依重生時間排序</button>
+          </div>
+        </div>
+
+        <div class="row-list" id="row-list"></div>
+      </div>
+
+      <div class="bottom-actions">
+        <button class="btn-primary" id="add-row-btn">＋ 新增一筆</button>
+        <button class="btn-outline" id="copy-all-btn">全部複製</button>
+        <button class="btn-outline btn-danger-soft" id="clear-all-btn">
+          清空清單
+        </button>
+      </div>
+
+      <div class="footer-time" id="footer-time">現在時間：—（台北時間）</div>
+    </div>
+
+    <div class="floating-next-card" id="floating-next-card">
+      <div class="floating-next-title">即將冒出來的蘑菇</div>
+      <div class="floating-next-name" id="floating-next-name">地點：—</div>
+      <div class="floating-next-time" id="floating-next-time">重生：—（—）</div>
+    </div>
+
+    <div
+      class="toast-stack"
+      id="toast-stack"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
