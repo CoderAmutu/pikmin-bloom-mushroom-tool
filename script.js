@@ -911,7 +911,9 @@ function updateLeadAlertSettingUI() {
 
 function updateAlertVolumeUI() {
     if (alertVolumeInput) {
-        alertVolumeInput.value = String(alertVolume);
+        const sanitized = sanitizeAlertVolume(alertVolume);
+        alertVolumeInput.value = String(sanitized);
+        alertVolumeInput.style.setProperty("--range-progress", `${sanitized}%`);
     }
 
     if (alertVolumeTextEl) {
@@ -1283,6 +1285,10 @@ if (alertVolumeInput) {
 
 function updateAlertVolumeUIValueOnly(value) {
     const sanitized = sanitizeAlertVolume(value);
+
+    if (alertVolumeInput) {
+        alertVolumeInput.style.setProperty("--range-progress", `${sanitized}%`);
+    }
 
     if (alertVolumeTextEl) {
         alertVolumeTextEl.textContent = `${getEffectiveAlertVolumePercent(sanitized)}%`;
