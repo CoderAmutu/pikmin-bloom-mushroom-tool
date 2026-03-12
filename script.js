@@ -405,6 +405,17 @@ function syncAllRowAlertStates(options = {}) {
     rows.forEach((row) => resetRowAlertState(row, options));
 }
 
+function clearRowTimer(row) {
+    row.targetTimestamp = null;
+    row.elements.hoursInput.value = "";
+    row.elements.minutesInput.value = "";
+    row.elements.secondsInput.value = "";
+    resetRowAlertState(row);
+    updateRowDisplay(row);
+    updateNextMushroomCard();
+    saveRowsToStorage();
+}
+
 function syncRowTimer(row) {
     const totalSeconds = getInputSeconds(row);
     row.targetTimestamp = totalSeconds > 0 ? Date.now() + totalSeconds * 1000 : null;
@@ -1224,7 +1235,24 @@ function updateClock() {
 
 function tick() {
     updateClock();
-    rows.forEach(updateRowDisplay);
+
+    rows.forEach((row) => {
+        const respawnTimestamp = getRespawnTimestamp(row);
+
+        if (respawnTimestamp !== null && respawnTimestamp <= Date.now()) {
+            if (!row.respawnTriggered) {
+                row.respawnTriggered = true;
+                row.lastReminderBucket = null;
+                triggerRespawnToast(row);
+            }
+
+            clearRowTimer(row);
+            return;
+        }
+
+        updateRowDisplay(row);
+    });
+
     checkAndFireAlerts();
     updateNextMushroomCard();
 }
