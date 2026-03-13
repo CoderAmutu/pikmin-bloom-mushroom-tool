@@ -12,6 +12,7 @@ const leadSecondsInput = document.getElementById("lead-seconds-input");
 const leadAlertEnabledInput = document.getElementById("lead-alert-enabled");
 const leadAlertSettingEl = document.getElementById("lead-alert-setting");
 const frequentReminderEnabledInput = document.getElementById("frequent-reminder-enabled");
+const systemNotificationEnabledInput = document.getElementById("system-notification-enabled");
 const alertVolumeInput = document.getElementById("alert-volume-input");
 const alertVolumeTextEl = document.getElementById("alert-volume-text");
 const toastStackEl = document.getElementById("toast-stack");
@@ -21,6 +22,7 @@ const ROWS_STORAGE_KEY = "pikmin-mushroom-rows";
 const ALERT_SECONDS_STORAGE_KEY = "pikmin-mushroom-alert-seconds";
 const ALERT_ENABLED_STORAGE_KEY = "pikmin-mushroom-alert-enabled";
 const FREQUENT_REMINDER_ENABLED_STORAGE_KEY = "pikmin-mushroom-frequent-reminder-enabled";
+const SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY = "pikmin-mushroom-system-notification-enabled";
 const ALERT_VOLUME_STORAGE_KEY = "pikmin-mushroom-alert-volume";
 
 const DEFAULT_ALERT_LEAD_SECONDS = 40;
@@ -28,6 +30,7 @@ const MIN_ALERT_LEAD_SECONDS = 1;
 const MAX_ALERT_LEAD_SECONDS = 60;
 const DEFAULT_ALERT_ENABLED = true;
 const DEFAULT_FREQUENT_REMINDER_ENABLED = true;
+const DEFAULT_SYSTEM_NOTIFICATION_ENABLED = false;
 const DEFAULT_ALERT_VOLUME = 65;
 const REMINDER_INTERVAL_SECONDS = 5;
 
@@ -41,10 +44,12 @@ let rowCreatedSeq = 0;
 let alertLeadSeconds = loadAlertLeadSeconds();
 let alertLeadEnabled = loadAlertLeadEnabled();
 let frequentReminderEnabled = loadFrequentReminderEnabled();
+let systemNotificationEnabled = loadSystemNotificationEnabled();
 let alertVolume = loadAlertVolume();
 let audioContext = null;
 let audioUnlocked = false;
 let audioHintShown = false;
+let serviceWorkerRegistrationPromise = null;
 
 function createRowData(createdSeq) {
     const finalCreatedSeq =
@@ -60,6 +65,7 @@ function createRowData(createdSeq) {
         lastReminderBucket: null,
         leadAlertDismissed: false,
         activeReminderToast: null,
+        systemLeadNotificationSent: false,
         elements: null,
     };
 }
@@ -111,6 +117,20 @@ function sanitizeAlertVolume(value) {
 
 function getEffectiveAlertVolumePercent(value = alertVolume) {
     return sanitizeAlertVolume(value) * 2;
+}
+
+function updateRangeProgress(inputEl, value) {
+    if (!inputEl) {
+        return;
+    }
+
+    const min = Number(inputEl.min || 0);
+    const max = Number(inputEl.max || 100);
+    const sanitizedValue = Number.isFinite(Number(value)) ? Number(value) : min;
+    const clampedValue = clamp(sanitizedValue, min, max);
+    const progress = max === min ? 0 : ((clampedValue - min) / (max - min)) * 100;
+
+    inputEl.style.setProperty("--range-progress", `${progress}%`);
 }
 
 function getTaipeiNow() {
@@ -271,6 +291,30 @@ function saveFrequentReminderEnabled() {
     }
 }
 
+function loadSystemNotificationEnabled() {
+    try {
+        const raw = localStorage.getItem(SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY);
+        if (raw === null) {
+            return DEFAULT_SYSTEM_NOTIFICATION_ENABLED;
+        }
+
+        return raw === "true";
+    } catch {
+        return DEFAULT_SYSTEM_NOTIFICATION_ENABLED;
+    }
+}
+
+function saveSystemNotificationEnabled() {
+    try {
+        localStorage.setItem(
+            SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY,
+            String(systemNotificationEnabled)
+        );
+    } catch {
+        // ignore
+    }
+}
+
 function loadAlertVolume() {
     try {
         const raw = localStorage.getItem(ALERT_VOLUME_STORAGE_KEY);
@@ -382,6 +426,72 @@ function hideActiveReminderToast(row) {
     row.activeReminderToast = null;
 }
 
+function isSystemNotificationSupported() {
+    return typeof Notification !== "undefined" && window.isSecureContext;
+}
+
+function shouldShowSystemNotificationNow() {
+    return document.visibilityState !== "visible" || !document.hasFocus();
+}
+
+function getNotificationIconUrl() {
+    return new URL("./favicon.ico", window.location.href).href;
+}
+
+async function ensureNotificationServiceWorker() {
+    if (!isSystemNotificationSupported() || !("serviceWorker" in navigator)) {
+        return null;
+    }
+
+    if (!serviceWorkerRegistrationPromise) {
+        serviceWorkerRegistrationPromise = navigator.serviceWorker
+            .register("./sw.js")
+            .then(() => navigator.serviceWorker.ready)
+            .catch(() => null);
+    }
+
+    return serviceWorkerRegistrationPromise;
+}
+
+async function showSystemNotification(title, body, options = {}) {
+    if (
+        !systemNotificationEnabled ||
+        !isSystemNotificationSupported() ||
+        Notification.permission !== "granted" ||
+        !shouldShowSystemNotificationNow()
+    ) {
+        return;
+    }
+
+    const notificationOptions = {
+        body,
+        icon: getNotificationIconUrl(),
+        badge: getNotificationIconUrl(),
+        tag: options.tag,
+        renotify: Boolean(options.renotify),
+        data: {
+            url: window.location.href,
+        },
+    };
+
+    try {
+        const registration = await ensureNotificationServiceWorker();
+
+        if (registration && typeof registration.showNotification === "function") {
+            await registration.showNotification(title, notificationOptions);
+            return;
+        }
+
+        const notification = new Notification(title, notificationOptions);
+        notification.onclick = () => {
+            window.focus();
+            notification.close();
+        };
+    } catch (error) {
+        console.warn("系統通知顯示失敗", error);
+    }
+}
+
 function resetRowAlertState(row, options = {}) {
     const {
         alignToCurrentWindow = false,
@@ -395,6 +505,12 @@ function resetRowAlertState(row, options = {}) {
     row.lastReminderBucket = alignToCurrentWindow
         ? getLeadReminderBucket(secondsUntilRespawn)
         : null;
+    row.systemLeadNotificationSent = Boolean(
+        alignToCurrentWindow &&
+            Number.isFinite(secondsUntilRespawn) &&
+            secondsUntilRespawn > 0 &&
+            secondsUntilRespawn <= alertLeadSeconds
+    );
 
     if (!preserveDismissed || row.respawnTriggered) {
         row.leadAlertDismissed = false;
@@ -403,17 +519,6 @@ function resetRowAlertState(row, options = {}) {
 
 function syncAllRowAlertStates(options = {}) {
     rows.forEach((row) => resetRowAlertState(row, options));
-}
-
-function clearRowTimer(row) {
-    row.targetTimestamp = null;
-    row.elements.hoursInput.value = "";
-    row.elements.minutesInput.value = "";
-    row.elements.secondsInput.value = "";
-    resetRowAlertState(row);
-    updateRowDisplay(row);
-    updateNextMushroomCard();
-    saveRowsToStorage();
 }
 
 function syncRowTimer(row) {
@@ -885,6 +990,22 @@ function triggerReminderToast(row, secondsUntilRespawn) {
     );
 }
 
+function triggerLeadSystemNotification(row, secondsUntilRespawn) {
+    const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+    const respawnTimestamp = getRespawnTimestamp(row);
+
+    if (!respawnTimestamp) {
+        return;
+    }
+
+    const respawnTimeText = formatTaipeiTime(new Date(respawnTimestamp));
+    showSystemNotification(
+        `還有 ${secondsUntilRespawn} 秒：${name}`,
+        `預計 ${respawnTimeText} 重生。`,
+        { tag: `pikmin-lead-${row.id}` }
+    );
+}
+
 function triggerRespawnToast(row) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
 
@@ -893,6 +1014,14 @@ function triggerRespawnToast(row) {
     showToast(`${name} 已重生`, "可以準備重新挑戰這朵蘑菇了。", "success", {
         durationMs: 4200,
         shake: true,
+    });
+}
+
+function triggerRespawnSystemNotification(row) {
+    const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+    showSystemNotification(`${name} 已重生`, "可以準備重新挑戰這朵蘑菇了。", {
+        tag: `pikmin-respawn-${row.id}`,
+        renotify: true,
     });
 }
 
@@ -922,14 +1051,119 @@ function updateLeadAlertSettingUI() {
 
 function updateAlertVolumeUI() {
     if (alertVolumeInput) {
-        const sanitized = sanitizeAlertVolume(alertVolume);
-        alertVolumeInput.value = String(sanitized);
-        alertVolumeInput.style.setProperty("--range-progress", `${sanitized}%`);
+        alertVolumeInput.value = String(alertVolume);
+        updateRangeProgress(alertVolumeInput, alertVolume);
     }
 
     if (alertVolumeTextEl) {
         alertVolumeTextEl.textContent = `${getEffectiveAlertVolumePercent()}%`;
     }
+}
+
+function updateSystemNotificationSettingUI() {
+    if (!systemNotificationEnabledInput) {
+        return;
+    }
+
+    const isSupported = isSystemNotificationSupported();
+    systemNotificationEnabledInput.checked = systemNotificationEnabled && isSupported;
+    systemNotificationEnabledInput.disabled = !isSupported;
+
+    const systemNotificationSettingEl = document.getElementById("system-notification-setting");
+    if (systemNotificationSettingEl) {
+        systemNotificationSettingEl.classList.toggle("is-disabled", !isSupported);
+
+        if (!isSupported) {
+            const reason = window.isSecureContext
+                ? "目前瀏覽器不支援系統通知"
+                : "系統通知需要 HTTPS 或 localhost";
+            systemNotificationSettingEl.title = reason;
+        } else if (Notification.permission === "denied") {
+            systemNotificationSettingEl.title = "瀏覽器已封鎖通知，需到瀏覽器設定手動允許";
+        } else {
+            systemNotificationSettingEl.removeAttribute("title");
+        }
+    }
+}
+
+async function applySystemNotificationEnabled(value, { silent = false } = {}) {
+    const wantsEnabled = Boolean(value);
+
+    if (!wantsEnabled) {
+        systemNotificationEnabled = false;
+        saveSystemNotificationEnabled();
+        updateSystemNotificationSettingUI();
+
+        if (!silent) {
+            showToast("系統通知已關閉", "之後不會再跳出作業系統通知。", "info");
+        }
+        return false;
+    }
+
+    if (!isSystemNotificationSupported()) {
+        systemNotificationEnabled = false;
+        saveSystemNotificationEnabled();
+        updateSystemNotificationSettingUI();
+
+        if (!silent) {
+            const reason = window.isSecureContext
+                ? "目前瀏覽器不支援這種系統通知。"
+                : "系統通知需要在 HTTPS 網站或 localhost 下使用。";
+            showToast("無法開啟系統通知", reason, "warning");
+        }
+        return false;
+    }
+
+    let permission = Notification.permission;
+
+    if (permission !== "granted") {
+        if (silent) {
+            systemNotificationEnabled = false;
+            saveSystemNotificationEnabled();
+            updateSystemNotificationSettingUI();
+            return false;
+        }
+
+        try {
+            permission = await Notification.requestPermission();
+        } catch {
+            permission = "denied";
+        }
+    }
+
+    if (permission !== "granted") {
+        systemNotificationEnabled = false;
+        saveSystemNotificationEnabled();
+        updateSystemNotificationSettingUI();
+
+        if (!silent) {
+            if (permission === "denied") {
+                showToast(
+                    "系統通知未開啟",
+                    "瀏覽器已封鎖通知，請到網址列或瀏覽器設定手動允許。",
+                    "warning"
+                );
+            } else {
+                showToast("系統通知未開啟", "您尚未允許通知權限。", "info");
+            }
+        }
+        return false;
+    }
+
+    systemNotificationEnabled = true;
+    saveSystemNotificationEnabled();
+    updateSystemNotificationSettingUI();
+    await ensureNotificationServiceWorker();
+
+    if (!silent) {
+        showToast(
+            "系統通知已開啟",
+            "當頁面不在前景時，提前提醒與已重生都會跳出系統通知。",
+            "success"
+        );
+    }
+
+    return true;
 }
 
 function checkAndFireAlerts() {
@@ -946,6 +1180,7 @@ function checkAndFireAlerts() {
             row.respawnTriggered = true;
             row.lastReminderBucket = null;
             triggerRespawnToast(row);
+            triggerRespawnSystemNotification(row);
             return;
         }
 
@@ -962,8 +1197,14 @@ function checkAndFireAlerts() {
         }
 
         if (currentBucket !== row.lastReminderBucket) {
+            const isFirstLeadNotification = row.lastReminderBucket === null;
             row.lastReminderBucket = currentBucket;
             triggerReminderToast(row, secondsUntilRespawn);
+
+            if (isFirstLeadNotification && !row.systemLeadNotificationSent) {
+                row.systemLeadNotificationSent = true;
+                triggerLeadSystemNotification(row, secondsUntilRespawn);
+            }
         }
     });
 }
@@ -1235,24 +1476,7 @@ function updateClock() {
 
 function tick() {
     updateClock();
-
-    rows.forEach((row) => {
-        const respawnTimestamp = getRespawnTimestamp(row);
-
-        if (respawnTimestamp !== null && respawnTimestamp <= Date.now()) {
-            if (!row.respawnTriggered) {
-                row.respawnTriggered = true;
-                row.lastReminderBucket = null;
-                triggerRespawnToast(row);
-            }
-
-            clearRowTimer(row);
-            return;
-        }
-
-        updateRowDisplay(row);
-    });
-
+    rows.forEach(updateRowDisplay);
     checkAndFireAlerts();
     updateNextMushroomCard();
 }
@@ -1301,6 +1525,12 @@ if (frequentReminderEnabledInput) {
     });
 }
 
+if (systemNotificationEnabledInput) {
+    systemNotificationEnabledInput.addEventListener("change", async () => {
+        await applySystemNotificationEnabled(systemNotificationEnabledInput.checked);
+    });
+}
+
 if (alertVolumeInput) {
     alertVolumeInput.addEventListener("input", () => {
         updateAlertVolumeUIValueOnly(alertVolumeInput.value);
@@ -1315,7 +1545,7 @@ function updateAlertVolumeUIValueOnly(value) {
     const sanitized = sanitizeAlertVolume(value);
 
     if (alertVolumeInput) {
-        alertVolumeInput.style.setProperty("--range-progress", `${sanitized}%`);
+        updateRangeProgress(alertVolumeInput, sanitized);
     }
 
     if (alertVolumeTextEl) {
@@ -1332,6 +1562,7 @@ applyAlertLeadEnabled(alertLeadEnabled, { silent: true });
 applyFrequentReminderEnabled(frequentReminderEnabled, { silent: true });
 applyAlertLeadSeconds(alertLeadSeconds, { silent: true });
 applyAlertVolume(alertVolume, { silent: true });
+applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
 tags = loadTagsFromStorage();
 renderTags();
 restoreRowsFromStorage();
