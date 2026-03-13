@@ -11,6 +11,8 @@
   --leaf-green-soft: #f1fbf4;
   --leaf-green-line: #cfead9;
   --leaf-green-focus: rgba(52, 199, 89, 0.18);
+  --leaf-green-glow: rgba(98, 214, 142, 0.52);
+  --leaf-green-glow-soft: rgba(98, 214, 142, 0.18);
 
   --pikmin-red: #ff5a4f;
   --pikmin-yellow: #ffd84d;
@@ -344,7 +346,13 @@ body {
 .sound-setting-control input[type="range"]::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #78dda0 0%, var(--leaf-green) var(--range-progress), #e3ede6 var(--range-progress), #e3ede6 100%);
+  background: linear-gradient(
+    90deg,
+    #78dda0 0%,
+    var(--leaf-green) var(--range-progress),
+    #e3ede6 var(--range-progress),
+    #e3ede6 100%
+  );
   box-shadow: inset 0 1px 2px rgba(24, 49, 83, 0.08);
 }
 
@@ -559,6 +567,50 @@ button:disabled {
   background: var(--card-strong);
   padding: 14px 16px;
   box-shadow: 0 8px 18px rgba(34, 80, 24, 0.08);
+}
+
+.mushroom-row.is-respawn-highlight {
+  border-color: rgba(98, 214, 142, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(98, 214, 142, 0.26),
+    0 0 0 6px var(--leaf-green-glow-soft),
+    0 0 22px var(--leaf-green-glow),
+    0 12px 26px rgba(52, 199, 89, 0.16);
+  animation: respawnGreenGlow 3s ease-out 1;
+}
+
+.mushroom-row.is-respawn-highlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+    inset 0 0 24px rgba(144, 238, 174, 0.22);
+}
+
+@keyframes respawnGreenGlow {
+  0% {
+    transform: scale(0.995);
+    box-shadow:
+      0 0 0 0 rgba(98, 214, 142, 0),
+      0 0 0 0 rgba(98, 214, 142, 0),
+      0 8px 18px rgba(34, 80, 24, 0.08);
+  }
+
+  30% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 1px rgba(98, 214, 142, 0.36),
+      0 0 0 8px rgba(98, 214, 142, 0.22),
+      0 0 24px rgba(98, 214, 142, 0.48),
+      0 12px 26px rgba(52, 199, 89, 0.16);
+  }
+
+  100% {
+    transform: scale(1);
+  }
 }
 
 .mushroom-row::before {

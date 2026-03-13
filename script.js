@@ -33,6 +33,7 @@ const DEFAULT_FREQUENT_REMINDER_ENABLED = true;
 const DEFAULT_SYSTEM_NOTIFICATION_ENABLED = false;
 const DEFAULT_ALERT_VOLUME = 65;
 const REMINDER_INTERVAL_SECONDS = 5;
+const RESPAWN_HIGHLIGHT_DURATION_MS = 3000;
 
 const floatingNextCardEl = document.getElementById("floating-next-card");
 const floatingNextNameEl = document.getElementById("floating-next-name");
@@ -66,6 +67,7 @@ function createRowData(createdSeq) {
         leadAlertDismissed: false,
         activeReminderToast: null,
         systemLeadNotificationSent: false,
+        respawnHighlightTimeoutId: null,
         elements: null,
     };
 }
@@ -426,6 +428,33 @@ function hideActiveReminderToast(row) {
     row.activeReminderToast = null;
 }
 
+function clearRespawnHighlight(row) {
+    if (!row) {
+        return;
+    }
+
+    if (row.respawnHighlightTimeoutId) {
+        window.clearTimeout(row.respawnHighlightTimeoutId);
+        row.respawnHighlightTimeoutId = null;
+    }
+
+    row.elements?.wrapper?.classList.remove("is-respawn-highlight");
+}
+
+function triggerRespawnHighlight(row) {
+    if (!row?.elements?.wrapper) {
+        return;
+    }
+
+    clearRespawnHighlight(row);
+    row.elements.wrapper.classList.add("is-respawn-highlight");
+
+    row.respawnHighlightTimeoutId = window.setTimeout(() => {
+        row.elements?.wrapper?.classList.remove("is-respawn-highlight");
+        row.respawnHighlightTimeoutId = null;
+    }, RESPAWN_HIGHLIGHT_DURATION_MS);
+}
+
 function isSystemNotificationSupported() {
     return typeof Notification !== "undefined" && window.isSecureContext;
 }
@@ -499,6 +528,7 @@ function resetRowAlertState(row, options = {}) {
     } = options;
 
     hideActiveReminderToast(row);
+    clearRespawnHighlight(row);
 
     const secondsUntilRespawn = getSecondsUntilRespawn(row);
     row.respawnTriggered = secondsUntilRespawn === null ? true : secondsUntilRespawn <= 0;
@@ -507,9 +537,9 @@ function resetRowAlertState(row, options = {}) {
         : null;
     row.systemLeadNotificationSent = Boolean(
         alignToCurrentWindow &&
-            Number.isFinite(secondsUntilRespawn) &&
-            secondsUntilRespawn > 0 &&
-            secondsUntilRespawn <= alertLeadSeconds
+        Number.isFinite(secondsUntilRespawn) &&
+        secondsUntilRespawn > 0 &&
+        secondsUntilRespawn <= alertLeadSeconds
     );
 
     if (!preserveDismissed || row.respawnTriggered) {
@@ -1010,6 +1040,7 @@ function triggerRespawnToast(row) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
 
     hideActiveReminderToast(row);
+    triggerRespawnHighlight(row);
     playAlertSound("respawn");
     showToast(`${name} 已重生`, "可以準備重新挑戰這朵蘑菇了。", "success", {
         durationMs: 4200,
@@ -1416,6 +1447,7 @@ function addRow(initialData = {}) {
 
         rows.splice(index, 1);
         hideActiveReminderToast(row);
+        clearRespawnHighlight(row);
         wrapper.remove();
         updateIndices();
         updateNextMushroomCard();
@@ -1453,6 +1485,7 @@ function clearAllRows() {
 
     rows.forEach((row) => {
         hideActiveReminderToast(row);
+        clearRespawnHighlight(row);
         row.elements.wrapper.remove();
     });
     rows.length = 0;
