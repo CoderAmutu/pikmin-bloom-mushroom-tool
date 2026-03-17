@@ -33,7 +33,9 @@ const DEFAULT_FREQUENT_REMINDER_ENABLED = true;
 const DEFAULT_SYSTEM_NOTIFICATION_ENABLED = false;
 const DEFAULT_ALERT_VOLUME = 65;
 const REMINDER_INTERVAL_SECONDS = 5;
-const RESPAWN_HIGHLIGHT_DURATION_MS = 3000;
+const SOON_STATUS_WINDOW_SECONDS = 5 * 60;
+// 想改成重生前幾秒開始高亮，就改這個數字（目前是 10 秒）
+const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 
 const floatingNextCardEl = document.getElementById("floating-next-card");
 const floatingNextNameEl = document.getElementById("floating-next-name");
@@ -62,6 +64,8 @@ function createRowData(createdSeq) {
         id: crypto.randomUUID(),
         createdSeq: finalCreatedSeq,
         targetTimestamp: null,
+        respawnState: false,
+        lastRespawnTimestamp: null,
         respawnTriggered: false,
         lastReminderBucket: null,
         leadAlertDismissed: false,
@@ -199,6 +203,11 @@ function loadRowsFromStorage() {
                 name: String(item.name || "").trim(),
                 targetTimestamp:
                     typeof item.targetTimestamp === "number" ? item.targetTimestamp : null,
+                respawnState: item.respawnState === true,
+                lastRespawnTimestamp:
+                    typeof item.lastRespawnTimestamp === "number"
+                        ? item.lastRespawnTimestamp
+                        : null,
                 createdSeq:
                     typeof item.createdSeq === "number" ? item.createdSeq : undefined,
             }))
@@ -206,6 +215,7 @@ function loadRowsFromStorage() {
                 (item) =>
                     item.name !== "" ||
                     item.targetTimestamp !== null ||
+                    item.respawnState === true ||
                     typeof item.createdSeq === "number"
             );
     } catch {
@@ -218,6 +228,8 @@ function saveRowsToStorage() {
         const payload = rows.map((row) => ({
             name: row.elements.nameInput.value.trim(),
             targetTimestamp: row.targetTimestamp,
+            respawnState: row.respawnState === true,
+            lastRespawnTimestamp: row.lastRespawnTimestamp,
             createdSeq: row.createdSeq,
         }));
 
@@ -387,6 +399,11 @@ function getSecondsUntilRespawn(row) {
     return getRemainingSecondsFromTarget(respawnTimestamp);
 }
 
+function isRowRespawned(row) {
+    const respawnTimestamp = getRespawnTimestamp(row);
+    return Number.isFinite(respawnTimestamp) && respawnTimestamp <= Date.now();
+}
+
 function getLeadReminderBucket(secondsUntilRespawn) {
     if (
         !Number.isFinite(secondsUntilRespawn) ||
@@ -441,18 +458,27 @@ function clearRespawnHighlight(row) {
     row.elements?.wrapper?.classList.remove("is-respawn-highlight");
 }
 
-function triggerRespawnHighlight(row) {
+function shouldHighlightBeforeRespawn(row) {
+    const secondsUntilRespawn = getSecondsUntilRespawn(row);
+
+    return (
+        Number.isFinite(secondsUntilRespawn) &&
+        secondsUntilRespawn > 0 &&
+        secondsUntilRespawn <= PRE_RESPAWN_HIGHLIGHT_SECONDS
+    );
+}
+
+function updateRespawnHighlight(row) {
     if (!row?.elements?.wrapper) {
         return;
     }
 
-    clearRespawnHighlight(row);
-    row.elements.wrapper.classList.add("is-respawn-highlight");
+    if (shouldHighlightBeforeRespawn(row)) {
+        row.elements.wrapper.classList.add("is-respawn-highlight");
+        return;
+    }
 
-    row.respawnHighlightTimeoutId = window.setTimeout(() => {
-        row.elements?.wrapper?.classList.remove("is-respawn-highlight");
-        row.respawnHighlightTimeoutId = null;
-    }, RESPAWN_HIGHLIGHT_DURATION_MS);
+    clearRespawnHighlight(row);
 }
 
 function isSystemNotificationSupported() {
@@ -531,12 +557,16 @@ function resetRowAlertState(row, options = {}) {
     clearRespawnHighlight(row);
 
     const secondsUntilRespawn = getSecondsUntilRespawn(row);
-    row.respawnTriggered = secondsUntilRespawn === null ? true : secondsUntilRespawn <= 0;
-    row.lastReminderBucket = alignToCurrentWindow
-        ? getLeadReminderBucket(secondsUntilRespawn)
-        : null;
+    const respawned = isRowRespawned(row);
+
+    row.respawnTriggered = secondsUntilRespawn === null ? true : respawned;
+    row.lastReminderBucket =
+        alignToCurrentWindow && !respawned
+            ? getLeadReminderBucket(secondsUntilRespawn)
+            : null;
     row.systemLeadNotificationSent = Boolean(
         alignToCurrentWindow &&
+        !respawned &&
         Number.isFinite(secondsUntilRespawn) &&
         secondsUntilRespawn > 0 &&
         secondsUntilRespawn <= alertLeadSeconds
@@ -551,16 +581,113 @@ function syncAllRowAlertStates(options = {}) {
     rows.forEach((row) => resetRowAlertState(row, options));
 }
 
+function clearRespawnedRowInputs(row, { skipSave = false, skipNextCardUpdate = false } = {}) {
+    if (!row || !row.targetTimestamp || !isRowRespawned(row)) {
+        return false;
+    }
+
+    hideActiveReminderToast(row);
+
+    row.lastRespawnTimestamp = getRespawnTimestamp(row);
+    row.targetTimestamp = null;
+    row.respawnState = true;
+    row.respawnTriggered = true;
+    row.lastReminderBucket = null;
+    row.leadAlertDismissed = false;
+    row.systemLeadNotificationSent = false;
+
+    updateInputFieldsFromTarget(row);
+    updateRowDisplay(row);
+
+    if (!skipNextCardUpdate) {
+        updateNextMushroomCard();
+    }
+
+    if (!skipSave) {
+        saveRowsToStorage();
+    }
+
+    return true;
+}
+
 function syncRowTimer(row) {
     const totalSeconds = getInputSeconds(row);
+
+    // 使用者一旦開始重新編輯時間，就清除「已重生」保留狀態。
+    row.respawnState = false;
+    row.lastRespawnTimestamp = null;
     row.targetTimestamp = totalSeconds > 0 ? Date.now() + totalSeconds * 1000 : null;
+
     resetRowAlertState(row);
     updateRowDisplay(row);
     updateNextMushroomCard();
     saveRowsToStorage();
 }
 
+function getRowStatus(row) {
+    if (row?.respawnState) {
+        return {
+            key: "respawned",
+            label: "已重生",
+        };
+    }
+
+    if (!row?.targetTimestamp) {
+        return {
+            key: "empty",
+            label: "未設定",
+        };
+    }
+
+    const secondsUntilRespawn = getSecondsUntilRespawn(row);
+
+    if (isRowRespawned(row)) {
+        return {
+            key: "respawned",
+            label: "已重生",
+        };
+    }
+
+    if (
+        secondsUntilRespawn !== null &&
+        secondsUntilRespawn > 0 &&
+        secondsUntilRespawn <= SOON_STATUS_WINDOW_SECONDS
+    ) {
+        return {
+            key: "soon",
+            label: "即將重生",
+        };
+    }
+
+    return {
+        key: "counting",
+        label: "倒數中",
+    };
+}
+
+function updateRowStatusUI(row) {
+    if (!row?.elements?.statusBadge) {
+        return;
+    }
+
+    const status = getRowStatus(row);
+    row.elements.statusBadge.textContent = status.label;
+    row.elements.statusBadge.className = `row-status-badge is-${status.key}`;
+    row.elements.wrapper.dataset.rowStatus = status.key;
+}
+
 function updateRowDisplay(row) {
+    updateRowStatusUI(row);
+    updateRespawnHighlight(row);
+
+    if (row.respawnState && !row.targetTimestamp) {
+        row.elements.countdownBox.textContent = "00:00:00";
+        row.elements.respawnBox.textContent = row.lastRespawnTimestamp
+            ? formatTaipeiTime(new Date(row.lastRespawnTimestamp))
+            : "—";
+        return;
+    }
+
     if (!row.targetTimestamp) {
         row.elements.countdownBox.textContent = "00:00:00";
         row.elements.respawnBox.textContent = "—";
@@ -1040,7 +1167,6 @@ function triggerRespawnToast(row) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
 
     hideActiveReminderToast(row);
-    triggerRespawnHighlight(row);
     playAlertSound("respawn");
     showToast(`${name} 已重生`, "可以準備重新挑戰這朵蘑菇了。", "success", {
         durationMs: 4200,
@@ -1212,6 +1338,7 @@ function checkAndFireAlerts() {
             row.lastReminderBucket = null;
             triggerRespawnToast(row);
             triggerRespawnSystemNotification(row);
+            clearRespawnedRowInputs(row);
             return;
         }
 
@@ -1324,13 +1451,19 @@ function addRow(initialData = {}) {
 
     const nameField = document.createElement("div");
     nameField.className = "field";
+    const nameLabelRow = document.createElement("div");
+    nameLabelRow.className = "field-label-row";
     const nameLabel = document.createElement("label");
     nameLabel.textContent = "地點";
+    const statusBadge = document.createElement("span");
+    statusBadge.className = "row-status-badge is-empty";
+    statusBadge.textContent = "未設定";
+    nameLabelRow.append(nameLabel, statusBadge);
     const nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.placeholder = "例如：台北世家中庭帷幕";
     nameInput.value = initialData.name || "";
-    nameField.append(nameLabel, nameInput);
+    nameField.append(nameLabelRow, nameInput);
 
     const timeField = document.createElement("div");
     timeField.className = "field";
@@ -1396,6 +1529,7 @@ function addRow(initialData = {}) {
         secondsInput,
         countdownBox,
         respawnBox,
+        statusBadge,
         addTagBtn,
         copyBtn,
         removeBtn,
@@ -1405,9 +1539,18 @@ function addRow(initialData = {}) {
         typeof initialData.targetTimestamp === "number"
             ? initialData.targetTimestamp
             : null;
+    row.respawnState = initialData.respawnState === true;
+    row.lastRespawnTimestamp =
+        typeof initialData.lastRespawnTimestamp === "number"
+            ? initialData.lastRespawnTimestamp
+            : null;
 
     updateInputFieldsFromTarget(row);
     resetRowAlertState(row, { alignToCurrentWindow: Boolean(initialData.targetTimestamp) });
+
+    if (isRowRespawned(row)) {
+        clearRespawnedRowInputs(row, { skipSave: true, skipNextCardUpdate: true });
+    }
 
     nameInput.addEventListener("input", () => {
         updateNextMushroomCard();
