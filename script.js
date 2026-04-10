@@ -17,6 +17,8 @@ const alertVolumeInput = document.getElementById("alert-volume-input");
 const alertVolumeTextEl = document.getElementById("alert-volume-text");
 const toastStackEl = document.getElementById("toast-stack");
 
+let customSortBtn = null;
+
 const TAGS_STORAGE_KEY = "pikmin-mushroom-tags";
 const ROWS_STORAGE_KEY = "pikmin-mushroom-rows";
 const ALERT_SECONDS_STORAGE_KEY = "pikmin-mushroom-alert-seconds";
@@ -24,6 +26,10 @@ const ALERT_ENABLED_STORAGE_KEY = "pikmin-mushroom-alert-enabled";
 const FREQUENT_REMINDER_ENABLED_STORAGE_KEY = "pikmin-mushroom-frequent-reminder-enabled";
 const SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY = "pikmin-mushroom-system-notification-enabled";
 const ALERT_VOLUME_STORAGE_KEY = "pikmin-mushroom-alert-volume";
+const SORT_MODE_STORAGE_KEY = "pikmin-mushroom-sort-mode";
+
+const SORT_MODE_RESPAWN = "respawn";
+const SORT_MODE_CUSTOM = "custom";
 
 const DEFAULT_ALERT_LEAD_SECONDS = 40;
 const MIN_ALERT_LEAD_SECONDS = 1;
@@ -49,6 +55,7 @@ let alertLeadEnabled = loadAlertLeadEnabled();
 let frequentReminderEnabled = loadFrequentReminderEnabled();
 let systemNotificationEnabled = loadSystemNotificationEnabled();
 let alertVolume = loadAlertVolume();
+let currentSortMode = loadSortMode();
 let audioContext = null;
 let audioUnlocked = false;
 let audioHintShown = false;
@@ -63,6 +70,7 @@ function createRowData(createdSeq) {
     return {
         id: crypto.randomUUID(),
         createdSeq: finalCreatedSeq,
+        customOrder: finalCreatedSeq,
         targetTimestamp: null,
         respawnState: false,
         lastRespawnTimestamp: null,
@@ -210,13 +218,16 @@ function loadRowsFromStorage() {
                         : null,
                 createdSeq:
                     typeof item.createdSeq === "number" ? item.createdSeq : undefined,
+                customOrder:
+                    typeof item.customOrder === "number" ? item.customOrder : undefined,
             }))
             .filter(
                 (item) =>
                     item.name !== "" ||
                     item.targetTimestamp !== null ||
                     item.respawnState === true ||
-                    typeof item.createdSeq === "number"
+                    typeof item.createdSeq === "number" ||
+                    typeof item.customOrder === "number"
             );
     } catch {
         return [];
@@ -231,6 +242,7 @@ function saveRowsToStorage() {
             respawnState: row.respawnState === true,
             lastRespawnTimestamp: row.lastRespawnTimestamp,
             createdSeq: row.createdSeq,
+            customOrder: row.customOrder,
         }));
 
         localStorage.setItem(ROWS_STORAGE_KEY, JSON.stringify(payload));
@@ -345,6 +357,24 @@ function loadAlertVolume() {
 function saveAlertVolume() {
     try {
         localStorage.setItem(ALERT_VOLUME_STORAGE_KEY, String(alertVolume));
+    } catch {
+        // ignore
+    }
+}
+
+
+function loadSortMode() {
+    try {
+        const raw = localStorage.getItem(SORT_MODE_STORAGE_KEY);
+        return raw === SORT_MODE_CUSTOM ? SORT_MODE_CUSTOM : SORT_MODE_RESPAWN;
+    } catch {
+        return SORT_MODE_RESPAWN;
+    }
+}
+
+function saveSortMode() {
+    try {
+        localStorage.setItem(SORT_MODE_STORAGE_KEY, currentSortMode);
     } catch {
         // ignore
     }
@@ -701,6 +731,8 @@ function updateRowDisplay(row) {
 }
 
 function updateIndices() {
+    normalizeCustomOrders();
+
     rows.forEach((row, index) => {
         row.elements.indexEl.textContent = `${index + 1}.`;
         row.elements.removeBtn.disabled = rows.length === 1;
@@ -811,7 +843,267 @@ function removeTag(name) {
     renderTags();
 }
 
-function sortRowsByRespawnTime() {
+function normalizeCustomOrders() {
+    const orderedRows = [...rows].sort((a, b) => {
+        const aOrder = Number.isFinite(a.customOrder) ? a.customOrder : Number.MAX_SAFE_INTEGER;
+        const bOrder = Number.isFinite(b.customOrder) ? b.customOrder : Number.MAX_SAFE_INTEGER;
+
+        if (aOrder !== bOrder) {
+            return aOrder - bOrder;
+        }
+
+        return a.createdSeq - b.createdSeq;
+    });
+
+    orderedRows.forEach((row, index) => {
+        row.customOrder = index + 1;
+    });
+}
+
+function renderRowsInCurrentArrayOrder() {
+    rows.forEach((row) => {
+        rowList.appendChild(row.elements.wrapper);
+    });
+
+    updateIndices();
+    updateCustomSortInteractionUI();
+    updateNextMushroomCard();
+}
+
+function updateSortButtonsUI() {
+    if (sortBtn) {
+        sortBtn.disabled = false;
+        sortBtn.classList.toggle("is-active", currentSortMode === SORT_MODE_RESPAWN);
+        sortBtn.setAttribute("aria-pressed", currentSortMode === SORT_MODE_RESPAWN ? "true" : "false");
+    }
+
+    if (customSortBtn) {
+        customSortBtn.disabled = false;
+        customSortBtn.classList.toggle("is-active", currentSortMode === SORT_MODE_CUSTOM);
+        customSortBtn.setAttribute("aria-pressed", currentSortMode === SORT_MODE_CUSTOM ? "true" : "false");
+    }
+}
+
+function updateCustomSortInteractionUI() {
+    rows.forEach((row) => {
+        const indexEl = row.elements?.indexEl;
+        const moveControls = row.elements?.moveControls;
+        const moveUpBtn = row.elements?.moveUpBtn;
+        const moveDownBtn = row.elements?.moveDownBtn;
+
+        if (!indexEl) {
+            return;
+        }
+
+        if (currentSortMode === SORT_MODE_CUSTOM) {
+            indexEl.style.cursor = "pointer";
+            indexEl.title = "自訂順序模式：點一下可調整這筆的位置";
+            indexEl.setAttribute("role", "button");
+            indexEl.setAttribute("tabindex", "0");
+
+            if (moveControls) {
+                moveControls.style.display = "grid";
+            }
+
+            if (moveUpBtn) {
+                moveUpBtn.disabled = rows.length <= 1 || row.customOrder <= 1;
+            }
+
+            if (moveDownBtn) {
+                moveDownBtn.disabled = rows.length <= 1 || row.customOrder >= rows.length;
+            }
+        } else {
+            indexEl.style.cursor = "default";
+            indexEl.removeAttribute("title");
+            indexEl.removeAttribute("role");
+            indexEl.removeAttribute("tabindex");
+
+            if (moveControls) {
+                moveControls.style.display = "none";
+            }
+
+            if (moveUpBtn) {
+                moveUpBtn.disabled = true;
+            }
+
+            if (moveDownBtn) {
+                moveDownBtn.disabled = true;
+            }
+        }
+    });
+}
+
+function sortRowsByCustomOrder(options = {}) {
+    const { persistMode = true } = options;
+
+    normalizeCustomOrders();
+    rows.sort((a, b) => {
+        if (a.customOrder !== b.customOrder) {
+            return a.customOrder - b.customOrder;
+        }
+
+        return a.createdSeq - b.createdSeq;
+    });
+
+    if (persistMode) {
+        currentSortMode = SORT_MODE_CUSTOM;
+        saveSortMode();
+    }
+
+    renderRowsInCurrentArrayOrder();
+    updateSortButtonsUI();
+    saveRowsToStorage();
+}
+
+function moveRowByCustomStep(row, step) {
+    if (!row || rows.length <= 1 || currentSortMode !== SORT_MODE_CUSTOM) {
+        return;
+    }
+
+    sortRowsByCustomOrder({ persistMode: false });
+
+    const currentIndex = rows.findIndex((item) => item.id === row.id);
+    if (currentIndex === -1) {
+        return;
+    }
+
+    const targetIndex = clamp(currentIndex + step, 0, rows.length - 1);
+    if (targetIndex === currentIndex) {
+        return;
+    }
+
+    const sortedRows = [...rows];
+    const [movedRow] = sortedRows.splice(currentIndex, 1);
+    sortedRows.splice(targetIndex, 0, movedRow);
+    sortedRows.forEach((item, index) => {
+        item.customOrder = index + 1;
+    });
+
+    rows.sort((a, b) => {
+        if (a.customOrder !== b.customOrder) {
+            return a.customOrder - b.customOrder;
+        }
+
+        return a.createdSeq - b.createdSeq;
+    });
+
+    renderRowsInCurrentArrayOrder();
+    saveRowsToStorage();
+}
+
+function promptCustomOrderMove(row) {
+    if (currentSortMode !== SORT_MODE_CUSTOM || rows.length <= 1) {
+        return;
+    }
+
+    sortRowsByCustomOrder({ persistMode: false });
+
+    const currentIndex = rows.findIndex((item) => item.id === row.id);
+    if (currentIndex === -1) {
+        return;
+    }
+
+    const name = row.elements.nameInput.value.trim() || `第 ${currentIndex + 1} 筆`;
+    const raw = window.prompt(
+        `請輸入「${name}」要移到第幾位（1-${rows.length}）`,
+        String(currentIndex + 1)
+    );
+
+    if (raw === null) {
+        return;
+    }
+
+    const targetIndex = Number(raw);
+    if (!Number.isFinite(targetIndex)) {
+        showToast("未更新順序", "請輸入有效的數字位置。", "warning");
+        return;
+    }
+
+    const clampedIndex = clamp(Math.floor(targetIndex), 1, rows.length) - 1;
+    if (clampedIndex === currentIndex) {
+        return;
+    }
+
+    const sortedRows = [...rows];
+    const [movedRow] = sortedRows.splice(currentIndex, 1);
+    sortedRows.splice(clampedIndex, 0, movedRow);
+    sortedRows.forEach((item, index) => {
+        item.customOrder = index + 1;
+    });
+
+    rows.sort((a, b) => {
+        if (a.customOrder !== b.customOrder) {
+            return a.customOrder - b.customOrder;
+        }
+
+        return a.createdSeq - b.createdSeq;
+    });
+
+    renderRowsInCurrentArrayOrder();
+    saveRowsToStorage();
+}
+
+function ensureCustomSortButton() {
+    if (!sortBtn || !sortBtn.parentElement) {
+        return;
+    }
+
+    if (!customSortBtn) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.id = "custom-sort-btn";
+        button.className = "btn-outline";
+        customSortBtn = button;
+    }
+
+    sortBtn.textContent = "依重生時間排序";
+    sortBtn.title = "依重生時間排序";
+    sortBtn.style.minWidth = "0";
+    sortBtn.style.paddingLeft = "14px";
+    sortBtn.style.paddingRight = "14px";
+
+    customSortBtn.textContent = "依自訂順序排序";
+    customSortBtn.title = "依自訂順序排序";
+    customSortBtn.style.minWidth = "0";
+    customSortBtn.style.paddingLeft = "14px";
+    customSortBtn.style.paddingRight = "14px";
+
+    let wrapper = document.getElementById("sort-mode-actions");
+    if (!wrapper) {
+        wrapper = document.createElement("div");
+        wrapper.id = "sort-mode-actions";
+        wrapper.style.display = "flex";
+        wrapper.style.alignItems = "center";
+        wrapper.style.justifyContent = "flex-start";
+        wrapper.style.gap = "8px";
+        wrapper.style.rowGap = "8px";
+        wrapper.style.flexWrap = "wrap";
+        wrapper.style.flex = "1 0 100%";
+        wrapper.style.width = "100%";
+        wrapper.style.marginTop = "4px";
+
+        const label = document.createElement("span");
+        label.textContent = "排序方式";
+        label.style.fontSize = "13px";
+        label.style.fontWeight = "800";
+        label.style.color = "#58708a";
+        label.style.whiteSpace = "nowrap";
+        wrapper.appendChild(label);
+
+        sortBtn.parentElement.insertBefore(wrapper, sortBtn);
+    }
+
+    if (sortBtn.parentElement !== wrapper) {
+        wrapper.appendChild(sortBtn);
+    }
+
+    if (customSortBtn.parentElement !== wrapper) {
+        wrapper.appendChild(customSortBtn);
+    }
+}
+
+function sortRowsByRespawnTime(options = {}) {
+    const { persistMode = true } = options;
     const now = Date.now();
 
     rows.sort((a, b) => {
@@ -842,12 +1134,13 @@ function sortRowsByRespawnTime() {
         return a.createdSeq - b.createdSeq;
     });
 
-    rows.forEach((row) => {
-        rowList.appendChild(row.elements.wrapper);
-    });
+    if (persistMode) {
+        currentSortMode = SORT_MODE_RESPAWN;
+        saveSortMode();
+    }
 
-    updateIndices();
-    updateNextMushroomCard();
+    renderRowsInCurrentArrayOrder();
+    updateSortButtonsUI();
     saveRowsToStorage();
 }
 
@@ -1383,6 +1676,27 @@ function applyAlertLeadSeconds(value, { silent = false } = {}) {
     }
 }
 
+function persistAlertLeadSecondsWhileTyping() {
+    if (!leadSecondsInput) {
+        return;
+    }
+
+    const rawValue = leadSecondsInput.value;
+
+    if (rawValue === "") {
+        return;
+    }
+
+    const parsedValue = Number(rawValue);
+
+    if (!Number.isFinite(parsedValue)) {
+        return;
+    }
+
+    alertLeadSeconds = sanitizeAlertLeadSeconds(parsedValue);
+    saveAlertLeadSeconds();
+}
+
 function applyAlertLeadEnabled(value, { silent = false } = {}) {
     alertLeadEnabled = Boolean(value);
     saveAlertLeadEnabled();
@@ -1432,6 +1746,8 @@ function applyAlertVolume(value, { silent = false } = {}) {
         }
     }
 }
+
+ensureCustomSortButton();
 
 window.addEventListener("scroll", updateFloatingNextCardVisibility);
 updateFloatingNextCardVisibility();
@@ -1502,6 +1818,23 @@ function addRow(initialData = {}) {
     addTagBtn.className = "btn-outline btn-add-tag";
     addTagBtn.textContent = "加入標籤";
 
+    const rowMoveControls = document.createElement("div");
+    rowMoveControls.className = "row-actions-bottom";
+
+    const moveUpBtn = document.createElement("button");
+    moveUpBtn.className = "btn-outline";
+    moveUpBtn.type = "button";
+    moveUpBtn.textContent = "↑ 往前";
+    moveUpBtn.title = "自訂順序往前移一位";
+
+    const moveDownBtn = document.createElement("button");
+    moveDownBtn.className = "btn-outline";
+    moveDownBtn.type = "button";
+    moveDownBtn.textContent = "↓ 往後";
+    moveDownBtn.title = "自訂順序往後移一位";
+
+    rowMoveControls.append(moveUpBtn, moveDownBtn);
+
     const rowActionsBottom = document.createElement("div");
     rowActionsBottom.className = "row-actions-bottom";
 
@@ -1514,7 +1847,7 @@ function addRow(initialData = {}) {
     removeBtn.textContent = "刪除";
 
     rowActionsBottom.append(copyBtn, removeBtn);
-    actionField.append(addTagBtn, rowActionsBottom);
+    actionField.append(addTagBtn, rowMoveControls, rowActionsBottom);
 
     rowMain.append(nameField, timeField, countdownField, respawnField);
     wrapper.append(indexEl, rowMain, actionField);
@@ -1531,6 +1864,9 @@ function addRow(initialData = {}) {
         respawnBox,
         statusBadge,
         addTagBtn,
+        moveControls: rowMoveControls,
+        moveUpBtn,
+        moveDownBtn,
         copyBtn,
         removeBtn,
     };
@@ -1544,6 +1880,10 @@ function addRow(initialData = {}) {
         typeof initialData.lastRespawnTimestamp === "number"
             ? initialData.lastRespawnTimestamp
             : null;
+    row.customOrder =
+        typeof initialData.customOrder === "number"
+            ? initialData.customOrder
+            : row.createdSeq;
 
     updateInputFieldsFromTarget(row);
     resetRowAlertState(row, { alignToCurrentWindow: Boolean(initialData.targetTimestamp) });
@@ -1555,6 +1895,27 @@ function addRow(initialData = {}) {
     nameInput.addEventListener("input", () => {
         updateNextMushroomCard();
         saveRowsToStorage();
+    });
+
+    indexEl.addEventListener("click", () => {
+        promptCustomOrderMove(row);
+    });
+
+    indexEl.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+            return;
+        }
+
+        event.preventDefault();
+        promptCustomOrderMove(row);
+    });
+
+    moveUpBtn.addEventListener("click", () => {
+        moveRowByCustomStep(row, -1);
+    });
+
+    moveDownBtn.addEventListener("click", () => {
+        moveRowByCustomStep(row, 1);
     });
 
     [hoursInput, minutesInput, secondsInput].forEach((input) => {
@@ -1592,16 +1953,32 @@ function addRow(initialData = {}) {
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
         wrapper.remove();
-        updateIndices();
-        updateNextMushroomCard();
+        normalizeCustomOrders();
+
+        if (currentSortMode === SORT_MODE_CUSTOM) {
+            sortRowsByCustomOrder({ persistMode: false });
+        } else {
+            updateIndices();
+            updateCustomSortInteractionUI();
+            updateNextMushroomCard();
+        }
+
         saveRowsToStorage();
     });
 
     rows.push(row);
-    updateIndices();
+
+    if (currentSortMode === SORT_MODE_CUSTOM) {
+        sortRowsByCustomOrder({ persistMode: false });
+    } else {
+        updateIndices();
+        updateCustomSortInteractionUI();
+        updateRowDisplay(row);
+        updateNextMushroomCard();
+        saveRowsToStorage();
+    }
+
     updateRowDisplay(row);
-    updateNextMushroomCard();
-    saveRowsToStorage();
 }
 
 function restoreRowsFromStorage() {
@@ -1657,10 +2034,24 @@ function tick() {
     updateNextMushroomCard();
 }
 
-sortBtn.addEventListener("click", () => {
-    sortRowsByRespawnTime();
-    flashButton(sortBtn, "已排序");
-});
+if (sortBtn) {
+    sortBtn.addEventListener("click", () => {
+        sortRowsByRespawnTime();
+        flashButton(sortBtn, "已排序");
+    });
+}
+
+if (customSortBtn) {
+    customSortBtn.addEventListener("click", () => {
+        const wasCustomMode = currentSortMode === SORT_MODE_CUSTOM;
+        sortRowsByCustomOrder();
+        flashButton(customSortBtn, "已排序");
+
+        if (!wasCustomMode) {
+            showToast("已切換為自訂順序排序", "現在可點左側編號，或用右側往前 / 往後調整位置。", "info");
+        }
+    });
+}
 
 copyAllBtn.addEventListener("click", async () => {
     const lines = rows
@@ -1680,6 +2071,10 @@ if (clearAllBtn) {
 }
 
 if (leadSecondsInput) {
+    leadSecondsInput.addEventListener("input", () => {
+        persistAlertLeadSecondsWhileTyping();
+    });
+
     leadSecondsInput.addEventListener("change", () => {
         applyAlertLeadSeconds(leadSecondsInput.value);
     });
@@ -1742,5 +2137,11 @@ applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
 tags = loadTagsFromStorage();
 renderTags();
 restoreRowsFromStorage();
+if (currentSortMode === SORT_MODE_CUSTOM) {
+    sortRowsByCustomOrder({ persistMode: false });
+} else {
+    sortRowsByRespawnTime({ persistMode: false });
+}
+updateSortButtonsUI();
 tick();
 setInterval(tick, 200);

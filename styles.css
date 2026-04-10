@@ -455,6 +455,22 @@ button:disabled {
   box-shadow: 0 6px 14px rgba(77, 163, 255, 0.12);
 }
 
+.btn-outline.is-active {
+  background: linear-gradient(180deg, #f4ffe9 0%, #ddf7bf 100%);
+  color: #2b7a2b;
+  border-color: #9fd57e;
+  box-shadow:
+    0 8px 18px rgba(24, 196, 0, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.btn-outline.is-active:hover {
+  background: linear-gradient(180deg, #f7ffef 0%, #e5fbca 100%);
+  box-shadow:
+    0 10px 22px rgba(24, 196, 0, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
 .btn-add-tag {
   background: linear-gradient(180deg, #f7fff2 0%, #eaffd7 100%);
   border: 1px solid #cdebc8;
