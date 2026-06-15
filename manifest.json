@@ -1,0 +1,20 @@
+{
+  "name": "皮克敏蘑菇重生推算器",
+  "short_name": "蘑菇推算器",
+  "description": "皮克敏 Bloom 蘑菇重生時間推算與提醒工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#dce8d2",
+  "theme_color": "#8fd14f",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "images/ICON_192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "images/ICON_512.png", "sizes": "512x512", "type": "image/png" },
+    {
+      "src": "images/ICON_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
