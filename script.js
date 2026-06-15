@@ -531,7 +531,11 @@ function shouldShowSystemNotificationNow() {
 }
 
 function getNotificationIconUrl() {
-    return new URL("./favicon.ico", window.location.href).href;
+    return new URL("./images/ICON_192.png", window.location.href).href;
+}
+
+function getNotificationBadgeUrl() {
+    return new URL("./images/badge.svg", window.location.href).href;
 }
 
 function showInstallButton() {
@@ -916,7 +920,7 @@ async function showSystemNotification(title, body, options = {}) {
     const notificationOptions = {
         body,
         icon: getNotificationIconUrl(),
-        badge: getNotificationIconUrl(),
+        badge: getNotificationBadgeUrl(),
         tag: options.tag,
         renotify: Boolean(options.renotify),
         data: {

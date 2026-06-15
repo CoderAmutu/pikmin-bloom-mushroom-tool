@@ -26,3 +26,6 @@ build/
 # Environment files
 .env
 .env.*
+
+# Cloudflare Wrangler 本地快取（含帳號資訊，不應上傳）
+.wrangler/

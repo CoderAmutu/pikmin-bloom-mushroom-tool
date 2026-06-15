@@ -95,8 +95,8 @@ function scheduleRowNotifications({ rowId, name, respawnTimestamp, leadTimestamp
             const secondsLeft = Math.max(0, Math.round((respawnTimestamp - Date.now()) / 1000));
             self.registration.showNotification(`還有 ${secondsLeft} 秒：${name}`, {
                 body: `預計 ${formatTaipeiTime(respawnTimestamp)} 重生。`,
-                icon: "./favicon.ico",
-                badge: "./favicon.ico",
+                icon: "./images/ICON_192.png",
+                badge: "./images/badge.svg",
                 tag: `pikmin-lead-${rowId}`,
                 data: { url: notificationUrl },
             });
@@ -108,8 +108,8 @@ function scheduleRowNotifications({ rowId, name, respawnTimestamp, leadTimestamp
             if (await isPageVisible()) return;
             self.registration.showNotification(`${name} 已重生`, {
                 body: "可以準備重新挑戰這朵蘑菇了。",
-                icon: "./favicon.ico",
-                badge: "./favicon.ico",
+                icon: "./images/ICON_192.png",
+                badge: "./images/badge.svg",
                 tag: `pikmin-respawn-${rowId}`,
                 renotify: true,
                 data: { url: notificationUrl },
@@ -142,7 +142,7 @@ self.addEventListener("push", (event) => {
         self.registration.showNotification(data.title, {
             body: data.body,
             icon: "./images/ICON_192.png",
-            badge: "./images/ICON_192.png",
+            badge: "./images/badge.svg",
             tag: data.tag,
             renotify: true,
             data: { url: self.location.origin },

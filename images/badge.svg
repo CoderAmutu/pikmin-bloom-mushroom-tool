@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- 蘑菇帽 -->
+  <ellipse cx="48" cy="28" rx="26" ry="18" fill="white"/>
+  <path d="M26,33 Q30,44 38,44 L58,44 Q66,44 70,33" fill="white"/>
+  <!-- 蘑菇柄 -->
+  <rect x="40" y="42" width="16" height="12" rx="5" fill="white"/>
+  <!-- PIKM 文字 -->
+  <text x="48" y="86" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="26" fill="white" text-anchor="middle" letter-spacing="-1">PIKM</text>
+</svg>
