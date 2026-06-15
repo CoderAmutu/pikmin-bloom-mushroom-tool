@@ -559,6 +559,70 @@ button:disabled {
   font-size: 14px;
 }
 
+/* 設定檔 */
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1px solid #d9e7d3;
+  background: rgba(255, 255, 255, 0.7);
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.profile-item.is-active {
+  border-color: #9fd57e;
+  background: linear-gradient(180deg, #f4ffe9 0%, #ddf7bf 100%);
+}
+
+.profile-item-name {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 800;
+  color: #183153;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-item.is-active .profile-item-name {
+  color: #2b7a2b;
+}
+
+.profile-active-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--leaf-green);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.profile-item-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.btn-sm {
+  min-height: 36px;
+  padding: 5px 14px;
+  font-size: 13px;
+  border-radius: 12px;
+}
+
 /* 清單 */
 .row-list {
   display: flex;

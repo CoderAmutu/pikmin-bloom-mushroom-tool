@@ -18,6 +18,14 @@ const alertVolumeTextEl = document.getElementById("alert-volume-text");
 const toastStackEl = document.getElementById("toast-stack");
 
 let customSortBtn = null;
+let deferredInstallPrompt = null;
+let installBtn = null;
+let testModeBtn = null;
+let testMode = false;
+
+const WORKER_URL = "https://pikmin-push-worker.amutu-lab.workers.dev";
+const VAPID_PUBLIC_KEY = "BECUpa1WhUmi9zqG6LCB6t_sXG0A8i_nU2kMd5npj5zRHWGWw9xXwZPPouxPOZzhxnCpS3BUH7wY4bSenxsuhvU";
+const CLIENT_ID_STORAGE_KEY = "pikmin-mushroom-client-id";
 
 const TAGS_STORAGE_KEY = "pikmin-mushroom-tags";
 const ROWS_STORAGE_KEY = "pikmin-mushroom-rows";
@@ -27,13 +35,14 @@ const FREQUENT_REMINDER_ENABLED_STORAGE_KEY = "pikmin-mushroom-frequent-reminder
 const SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY = "pikmin-mushroom-system-notification-enabled";
 const ALERT_VOLUME_STORAGE_KEY = "pikmin-mushroom-alert-volume";
 const SORT_MODE_STORAGE_KEY = "pikmin-mushroom-sort-mode";
+const PROFILES_STORAGE_KEY = "pikmin-mushroom-profiles";
 
 const SORT_MODE_RESPAWN = "respawn";
 const SORT_MODE_CUSTOM = "custom";
 
-const DEFAULT_ALERT_LEAD_SECONDS = 40;
+const DEFAULT_ALERT_LEAD_SECONDS = 90;
 const MIN_ALERT_LEAD_SECONDS = 1;
-const MAX_ALERT_LEAD_SECONDS = 60;
+const MAX_ALERT_LEAD_SECONDS = 300;
 const DEFAULT_ALERT_ENABLED = true;
 const DEFAULT_FREQUENT_REMINDER_ENABLED = true;
 const DEFAULT_SYSTEM_NOTIFICATION_ENABLED = false;
@@ -49,6 +58,8 @@ const floatingNextTimeEl = document.getElementById("floating-next-time");
 
 const rows = [];
 let tags = [];
+let profiles = {};
+let activeProfileName = null;
 let rowCreatedSeq = 0;
 let alertLeadSeconds = loadAlertLeadSeconds();
 let alertLeadEnabled = loadAlertLeadEnabled();
@@ -391,7 +402,7 @@ function getRespawnTimestamp(row) {
     if (!row.targetTimestamp) {
         return null;
     }
-    return row.targetTimestamp + 5 * 60 * 1000;
+    return row.targetTimestamp + (testMode ? 70 * 1000 : 5 * 60 * 1000);
 }
 
 function getReminderTimestamp(row) {
@@ -523,18 +534,372 @@ function getNotificationIconUrl() {
     return new URL("./favicon.ico", window.location.href).href;
 }
 
-async function ensureNotificationServiceWorker() {
-    if (!isSystemNotificationSupported() || !("serviceWorker" in navigator)) {
-        return null;
+function showInstallButton() {
+    if (installBtn) {
+        installBtn.style.display = "";
+        return;
     }
 
+    const bottomActions = document.querySelector(".bottom-actions");
+    if (!bottomActions) return;
+
+    installBtn = document.createElement("button");
+    installBtn.className = "btn-outline";
+    installBtn.textContent = "安裝應用程式";
+    installBtn.addEventListener("click", async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        if (outcome === "accepted") {
+            hideInstallButton();
+        }
+    });
+
+    bottomActions.appendChild(installBtn);
+}
+
+function hideInstallButton() {
+    if (installBtn) {
+        installBtn.style.display = "none";
+    }
+}
+
+function loadProfilesFromStorage() {
+    try {
+        const raw = localStorage.getItem(PROFILES_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== "object" || Array.isArray(parsed)) return {};
+        const result = {};
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof key === "string" && Array.isArray(value)) {
+                result[key] = value.map(String).filter((s) => s.length > 0);
+            }
+        }
+        return result;
+    } catch {
+        return {};
+    }
+}
+
+function saveProfilesToStorage() {
+    try {
+        localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles));
+    } catch {
+        // ignore
+    }
+}
+
+function renderProfiles() {
+    const profileListEl = document.getElementById("profile-list");
+    if (!profileListEl) return;
+
+    profileListEl.innerHTML = "";
+
+    const names = Object.keys(profiles);
+    if (names.length === 0) {
+        const emptyEl = document.createElement("div");
+        emptyEl.className = "empty-tags";
+        emptyEl.textContent = "目前還沒有設定檔";
+        profileListEl.appendChild(emptyEl);
+        return;
+    }
+
+    names.forEach((name) => {
+        const isActive = name === activeProfileName;
+
+        const item = document.createElement("div");
+        item.className = "profile-item" + (isActive ? " is-active" : "");
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "profile-item-name";
+        nameEl.textContent = name;
+
+        const actions = document.createElement("div");
+        actions.className = "profile-item-actions";
+
+        if (isActive) {
+            const badge = document.createElement("span");
+            badge.className = "profile-active-badge";
+            badge.textContent = "使用中";
+            item.append(nameEl, badge, actions);
+        } else {
+            item.append(nameEl, actions);
+        }
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "btn-outline btn-sm btn-add-tag";
+        saveBtn.textContent = "儲存";
+        saveBtn.addEventListener("click", () => {
+            const names = rows
+                .map((row) => row.elements.nameInput.value.trim())
+                .filter((n) => n.length > 0);
+            if (names.length === 0) {
+                showToast("無法儲存", "請先輸入至少一個地點名稱。", "warning");
+                return;
+            }
+            const confirmed = window.confirm(`確定要用目前地點清單覆蓋「${name}」設定檔嗎？`);
+            if (!confirmed) return;
+            profiles[name] = names;
+            saveProfilesToStorage();
+            renderProfiles();
+            showToast(`已更新「${name}」`, `共 ${names.length} 個地點。`, "success");
+        });
+
+        const applyBtn = document.createElement("button");
+        applyBtn.type = "button";
+        applyBtn.className = "btn-outline btn-sm";
+        applyBtn.textContent = "套用";
+        applyBtn.disabled = isActive;
+        applyBtn.addEventListener("click", () => applyProfile(name));
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "btn-outline btn-sm btn-danger-soft";
+        deleteBtn.textContent = "刪除";
+        deleteBtn.addEventListener("click", () => {
+            const confirmed = window.confirm(`確定要刪除設定檔「${name}」嗎？`);
+            if (!confirmed) return;
+            delete profiles[name];
+            if (activeProfileName === name) activeProfileName = null;
+            saveProfilesToStorage();
+            renderProfiles();
+        });
+
+        actions.append(saveBtn, applyBtn, deleteBtn);
+        profileListEl.appendChild(item);
+    });
+}
+
+function applyProfile(name) {
+    const locationNames = profiles[name];
+    if (!locationNames) return;
+
+    const confirmed = window.confirm(
+        `確定要套用「${name}」設定檔嗎？\n目前的地點清單與計時器都會被清除。`
+    );
+    if (!confirmed) return;
+
+    rows.forEach((row) => {
+        hideActiveReminderToast(row);
+        clearRespawnHighlight(row);
+        postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+        row.elements.wrapper.remove();
+    });
+    rows.length = 0;
+    localStorage.removeItem(ROWS_STORAGE_KEY);
+
+    const namesToAdd = locationNames.length > 0 ? locationNames : [""];
+    namesToAdd.forEach((locationName) => addRow({ name: locationName }));
+
+    if (currentSortMode === SORT_MODE_CUSTOM) {
+        sortRowsByCustomOrder({ persistMode: false });
+    } else {
+        sortRowsByRespawnTime({ persistMode: false });
+    }
+
+    activeProfileName = name;
+    updateIndices();
+    updateNextMushroomCard();
+    renderProfiles();
+    showToast(`已套用「${name}」`, `已載入 ${locationNames.length} 個地點。`, "success");
+}
+
+function saveCurrentAsProfile() {
+    const names = rows
+        .map((row) => row.elements.nameInput.value.trim())
+        .filter((name) => name.length > 0);
+
+    if (names.length === 0) {
+        showToast("無法儲存", "請先輸入至少一個地點名稱。", "warning");
+        return;
+    }
+
+    const profileName = window.prompt("新增場所設定檔\n\n將目前的地點清單儲存為一個新的設定檔，方便之後一鍵切換。\n\n請輸入設定檔名稱（例如：公司、在家、外縣市）：");
+    if (profileName === null) return;
+
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+        showToast("無法儲存", "設定檔名稱不能為空。", "warning");
+        return;
+    }
+
+    if (profiles[trimmedName]) {
+        const overwrite = window.confirm(`設定檔「${trimmedName}」已存在，確定要覆蓋嗎？`);
+        if (!overwrite) return;
+    }
+
+    profiles[trimmedName] = names;
+    saveProfilesToStorage();
+    renderProfiles();
+    showToast(`已儲存「${trimmedName}」`, `共 ${names.length} 個地點。`, "success");
+}
+
+function updateTestModeUI() {
+    if (!testModeBtn) return;
+    testModeBtn.textContent = testMode ? "測試模式：開" : "測試模式：關";
+    testModeBtn.classList.toggle("is-active", testMode);
+}
+
+function toggleTestMode() {
+    testMode = !testMode;
+    updateTestModeUI();
+    rows.forEach((row) => {
+        if (row.elements?.respawnLabel) {
+            row.elements.respawnLabel.textContent = testMode
+                ? "推算重生時間（+70 秒）"
+                : "推算重生時間（+5 分鐘）";
+        }
+    });
+    syncAllRowAlertStates({ alignToCurrentWindow: false });
+    rescheduleAllSwNotifications();
+    showToast(
+        testMode ? "測試模式已開啟" : "測試模式已關閉",
+        testMode ? "重生時間改為 +70 秒，方便快速測試。" : "重生時間恢復為 +5 分鐘。",
+        "info"
+    );
+}
+
+function initServiceWorker() {
+    if (!("serviceWorker" in navigator)) {
+        return;
+    }
     if (!serviceWorkerRegistrationPromise) {
         serviceWorkerRegistrationPromise = navigator.serviceWorker
             .register("./sw.js")
             .then(() => navigator.serviceWorker.ready)
             .catch(() => null);
     }
+}
 
+function getOrCreateClientId() {
+    let id = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem(CLIENT_ID_STORAGE_KEY, id);
+    }
+    return id;
+}
+
+function urlBase64ToUint8Array(b64u) {
+    const pad = "=".repeat((4 - (b64u.length % 4)) % 4);
+    const raw = atob((b64u + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function subscribeToPushIfNeeded() {
+    if (!("PushManager" in window)) return;
+    const registration = await serviceWorkerRegistrationPromise;
+    if (!registration) return;
+
+    let sub = await registration.pushManager.getSubscription();
+    if (!sub) {
+        try {
+            sub = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+            });
+        } catch (e) {
+            console.warn("Push 訂閱失敗", e);
+            return;
+        }
+    }
+
+    fetch(`${WORKER_URL}/api/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: getOrCreateClientId(), subscription: sub.toJSON() }),
+    }).catch((e) => console.warn("無法儲存訂閱", e));
+}
+
+function sendWorkerSchedule(row) {
+    if (!systemNotificationEnabled || Notification.permission !== "granted") return;
+    const respawnTimestamp = getRespawnTimestamp(row);
+    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return;
+
+    const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+    const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
+
+    fetch(`${WORKER_URL}/api/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            clientId: getOrCreateClientId(),
+            rowId: row.id,
+            name,
+            respawnTimestamp,
+            leadTimestamp: leadMs && leadMs > Date.now() ? leadMs : null,
+        }),
+    }).catch((e) => console.warn("無法排程推播", e));
+}
+
+function cancelWorkerSchedule(rowId) {
+    const clientId = getOrCreateClientId();
+    fetch(`${WORKER_URL}/api/schedule/${clientId}/${rowId}`, {
+        method: "DELETE",
+    }).catch((e) => console.warn("無法取消推播排程", e));
+}
+
+function postToSw(message) {
+    if (!serviceWorkerRegistrationPromise) return;
+    serviceWorkerRegistrationPromise.then((registration) => {
+        if (registration?.active) {
+            registration.active.postMessage(message);
+        }
+    });
+}
+
+function getSwSchedulePayload(row) {
+    if (!systemNotificationEnabled || Notification.permission !== "granted") return null;
+    const respawnTimestamp = getRespawnTimestamp(row);
+    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return null;
+
+    const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+    const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
+
+    return {
+        type: "SCHEDULE_NOTIFICATION",
+        rowId: row.id,
+        name,
+        respawnTimestamp,
+        leadTimestamp: leadMs && leadMs > Date.now() ? leadMs : null,
+        notificationUrl: window.location.href,
+    };
+}
+
+function scheduleSwNotification(row) {
+    const payload = getSwSchedulePayload(row);
+    if (!payload) {
+        postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+        cancelWorkerSchedule(row.id);
+        return;
+    }
+    // SW 負責提前通知，標記主執行緒不要重複發送
+    if (payload.leadTimestamp) {
+        row.systemLeadNotificationSent = true;
+    }
+    postToSw(payload);
+    sendWorkerSchedule(row);
+}
+
+function rescheduleAllSwNotifications() {
+    if (!systemNotificationEnabled || Notification.permission !== "granted") {
+        postToSw({ type: "CANCEL_ALL_NOTIFICATIONS" });
+        rows.forEach((row) => cancelWorkerSchedule(row.id));
+        return;
+    }
+    rows.forEach(scheduleSwNotification);
+}
+
+async function ensureNotificationServiceWorker() {
+    if (!isSystemNotificationSupported() || !("serviceWorker" in navigator)) {
+        return null;
+    }
+    if (!serviceWorkerRegistrationPromise) {
+        initServiceWorker();
+    }
     return serviceWorkerRegistrationPromise;
 }
 
@@ -625,6 +990,7 @@ function clearRespawnedRowInputs(row, { skipSave = false, skipNextCardUpdate = f
     row.lastReminderBucket = null;
     row.leadAlertDismissed = false;
     row.systemLeadNotificationSent = false;
+    postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
 
     updateInputFieldsFromTarget(row);
     updateRowDisplay(row);
@@ -652,6 +1018,7 @@ function syncRowTimer(row) {
     updateRowDisplay(row);
     updateNextMushroomCard();
     saveRowsToStorage();
+    scheduleSwNotification(row);
 }
 
 function getRowStatus(row) {
@@ -1452,7 +1819,7 @@ function triggerLeadSystemNotification(row, secondsUntilRespawn) {
     showSystemNotification(
         `還有 ${secondsUntilRespawn} 秒：${name}`,
         `預計 ${respawnTimeText} 重生。`,
-        { tag: `pikmin-lead-${row.id}` }
+        { tag: `pikmin-lead-${row.id}`, renotify: frequentReminderEnabled }
     );
 }
 
@@ -1543,6 +1910,7 @@ async function applySystemNotificationEnabled(value, { silent = false } = {}) {
         systemNotificationEnabled = false;
         saveSystemNotificationEnabled();
         updateSystemNotificationSettingUI();
+        postToSw({ type: "CANCEL_ALL_NOTIFICATIONS" });
 
         if (!silent) {
             showToast("系統通知已關閉", "之後不會再跳出作業系統通知。", "info");
@@ -1604,6 +1972,8 @@ async function applySystemNotificationEnabled(value, { silent = false } = {}) {
     saveSystemNotificationEnabled();
     updateSystemNotificationSettingUI();
     await ensureNotificationServiceWorker();
+    await subscribeToPushIfNeeded();
+    rescheduleAllSwNotifications();
 
     if (!silent) {
         showToast(
@@ -1652,7 +2022,9 @@ function checkAndFireAlerts() {
             row.lastReminderBucket = currentBucket;
             triggerReminderToast(row, secondsUntilRespawn);
 
-            if (isFirstLeadNotification && !row.systemLeadNotificationSent) {
+            if (frequentReminderEnabled) {
+                triggerLeadSystemNotification(row, secondsUntilRespawn);
+            } else if (isFirstLeadNotification && !row.systemLeadNotificationSent) {
                 row.systemLeadNotificationSent = true;
                 triggerLeadSystemNotification(row, secondsUntilRespawn);
             }
@@ -1670,6 +2042,8 @@ function applyAlertLeadSeconds(value, { silent = false } = {}) {
     saveAlertLeadSeconds();
     syncAllRowAlertStates({ alignToCurrentWindow: true, preserveDismissed: true });
     updateNextMushroomCard();
+
+    rescheduleAllSwNotifications();
 
     if (!silent && alertLeadEnabled) {
         showToast("提前提醒已更新", `目前會在重生前 ${alertLeadSeconds} 秒提醒您。`, "info");
@@ -1707,6 +2081,8 @@ function applyAlertLeadEnabled(value, { silent = false } = {}) {
     } else {
         syncAllRowAlertStates({ alignToCurrentWindow: true, preserveDismissed: true });
     }
+
+    rescheduleAllSwNotifications();
 
     if (!silent) {
         if (alertLeadEnabled) {
@@ -1805,7 +2181,7 @@ function addRow(initialData = {}) {
     const respawnField = document.createElement("div");
     respawnField.className = "field";
     const respawnLabel = document.createElement("label");
-    respawnLabel.textContent = "推算重生時間（+5 分鐘）";
+    respawnLabel.textContent = testMode ? "推算重生時間（+70 秒）" : "推算重生時間（+5 分鐘）";
     const respawnBox = document.createElement("div");
     respawnBox.className = "respawn-box";
     respawnBox.textContent = "—";
@@ -1862,6 +2238,7 @@ function addRow(initialData = {}) {
         secondsInput,
         countdownBox,
         respawnBox,
+        respawnLabel,
         statusBadge,
         addTagBtn,
         moveControls: rowMoveControls,
@@ -1952,6 +2329,7 @@ function addRow(initialData = {}) {
         rows.splice(index, 1);
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
+        postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
         wrapper.remove();
         normalizeCustomOrders();
 
@@ -2128,7 +2506,29 @@ addRowBtn.addEventListener("click", () => {
     addRow();
 });
 
+testModeBtn = document.getElementById("test-mode-btn");
+if (testModeBtn) {
+    testModeBtn.addEventListener("click", toggleTestMode);
+}
+
+const saveProfileBtn = document.getElementById("save-profile-btn");
+if (saveProfileBtn) {
+    saveProfileBtn.addEventListener("click", saveCurrentAsProfile);
+}
+
+initServiceWorker();
 registerAudioUnlockEvents();
+
+window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    showInstallButton();
+});
+
+window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    hideInstallButton();
+});
 applyAlertLeadEnabled(alertLeadEnabled, { silent: true });
 applyFrequentReminderEnabled(frequentReminderEnabled, { silent: true });
 applyAlertLeadSeconds(alertLeadSeconds, { silent: true });
@@ -2136,6 +2536,8 @@ applyAlertVolume(alertVolume, { silent: true });
 applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
 tags = loadTagsFromStorage();
 renderTags();
+profiles = loadProfilesFromStorage();
+renderProfiles();
 restoreRowsFromStorage();
 if (currentSortMode === SORT_MODE_CUSTOM) {
     sortRowsByCustomOrder({ persistMode: false });

@@ -7,6 +7,11 @@
     <link rel="icon" href="./favicon.ico?v=1" sizes="any" />
     <link rel="shortcut icon" href="./favicon.ico?v=1" />
     <link rel="apple-touch-icon" href="./favicon.ico?v=1" />
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#8fd14f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="蘑菇推算器" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -48,6 +53,19 @@
         </div>
       </div>
 
+      <div class="panel profile-panel">
+        <div class="panel-header panel-header-compact">
+          <div>
+            <h2>場所設定檔</h2>
+            <p>儲存常用地點組合，一鍵切換不同場所。</p>
+          </div>
+          <button class="btn-outline" id="save-profile-btn">新增場所設定檔</button>
+        </div>
+        <div class="profile-list" id="profile-list">
+          <div class="empty-tags" id="empty-profiles">目前還沒有設定檔</div>
+        </div>
+      </div>
+
       <div class="panel">
         <div class="panel-header">
           <div>
@@ -69,7 +87,7 @@
                   type="number"
                   id="lead-seconds-input"
                   min="1"
-                  max="60"
+                  max="300"
                   step="1"
                   inputmode="numeric"
                 />
@@ -124,6 +142,7 @@
         <button class="btn-outline btn-danger-soft" id="clear-all-btn">
           清空清單
         </button>
+        <button class="btn-outline" id="test-mode-btn">測試模式：關</button>
       </div>
 
       <div class="footer-time" id="footer-time">現在時間：—（台北時間）</div>
