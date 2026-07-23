@@ -175,6 +175,16 @@ body {
   text-overflow: ellipsis;
 }
 
+.next-card-open-hint {
+  color: #b45309;
+}
+
+.next-card-open-now-delay {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
 .panel {
   padding: 24px;
   margin-bottom: 20px;
@@ -326,6 +336,67 @@ body {
   font-weight: 800;
   color: #58708a;
   white-space: nowrap;
+}
+
+.optimal-open-setting {
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.optimal-open-control {
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.optimal-open-control input[type="number"] {
+  width: 56px;
+}
+
+.bias-mode-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.bias-mode-btn {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 14px;
+  height: 36px;
+  font-size: 13px;
+}
+
+.custom-bias-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.custom-bias-wrapper.is-hidden {
+  display: none;
+}
+
+.custom-bias-wrapper input[type="number"] {
+  width: 56px;
+  height: 36px;
+  padding: 0 10px;
+  text-align: center;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.optimal-open-control input[type="number"],
+.custom-bias-wrapper input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.optimal-open-control input[type="number"]::-webkit-outer-spin-button,
+.optimal-open-control input[type="number"]::-webkit-inner-spin-button,
+.custom-bias-wrapper input[type="number"]::-webkit-outer-spin-button,
+.custom-bias-wrapper input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .sound-setting-control {
@@ -1055,6 +1126,22 @@ input:focus {
   font-size: 15px;
   font-weight: 900;
   color: #1f3f28;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.floating-next-open-hint {
+  font-size: 15px;
+  font-weight: 900;
+  color: #b45309;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.floating-next-open-now-delay {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-soft);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }

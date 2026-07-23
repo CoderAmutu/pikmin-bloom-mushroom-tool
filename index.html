@@ -35,6 +35,12 @@
             <div class="next-card-line" id="next-mushroom-time">
               重生時間：—（—）
             </div>
+            <div class="next-card-line next-card-open-hint" id="next-mushroom-open-hint">
+              建議開遊戲：—
+            </div>
+            <div class="next-card-line next-card-open-now-delay" id="next-mushroom-open-now-delay">
+              現在開啟：—
+            </div>
           </div>
         </div>
       </div>
@@ -115,6 +121,50 @@
               </label>
             </div>
 
+            <div class="alert-setting optimal-open-setting" id="optimal-open-setting">
+              <div class="alert-setting-label">最佳開遊戲校正</div>
+
+              <div class="alert-setting-control optimal-open-bias-control">
+                <div class="bias-mode-tabs">
+                  <button type="button" class="btn-outline bias-mode-btn" data-mode="precise" title="開遊戲倒數剛好對齊刷新，誤差 0">精準</button>
+                  <button type="button" class="btn-outline bias-mode-btn" data-mode="conservative" title="預設。偏晚一點開，比較不怕手滑錯過">保守</button>
+                  <button type="button" class="btn-outline bias-mode-btn" data-mode="custom" title="自己輸入緩衝秒數">自訂</button>
+                </div>
+                <span class="custom-bias-wrapper" id="custom-bias-wrapper">
+                  <input
+                    type="number"
+                    id="custom-bias-seconds-input"
+                    min="0"
+                    max="30"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <span>秒緩衝</span>
+                </span>
+              </div>
+
+              <div class="alert-setting-control optimal-open-control">
+                <input
+                  type="number"
+                  id="game-load-seconds-input"
+                  min="0"
+                  max="60"
+                  step="1"
+                  inputmode="numeric"
+                />
+                <span>秒看到畫面</span>
+                <input
+                  type="number"
+                  id="refresh-period-seconds-input"
+                  min="1"
+                  max="60"
+                  step="1"
+                  inputmode="numeric"
+                />
+                <span>秒刷新一次</span>
+              </div>
+            </div>
+
             <div class="alert-setting sound-setting">
               <div class="alert-setting-label">音效音量</div>
               <div class="alert-setting-control sound-setting-control">
@@ -152,6 +202,8 @@
       <div class="floating-next-title">即將冒出來的蘑菇</div>
       <div class="floating-next-name" id="floating-next-name">地點：—</div>
       <div class="floating-next-time" id="floating-next-time">重生：—（—）</div>
+      <div class="floating-next-open-hint" id="floating-next-open-hint">建議開遊戲：—</div>
+      <div class="floating-next-open-now-delay" id="floating-next-open-now-delay">現在開啟：—</div>
     </div>
 
     <div

@@ -8,6 +8,13 @@ const copyAllBtn = document.getElementById("copy-all-btn");
 const clearAllBtn = document.getElementById("clear-all-btn");
 const nextMushroomNameEl = document.getElementById("next-mushroom-name");
 const nextMushroomTimeEl = document.getElementById("next-mushroom-time");
+const nextMushroomOpenHintEl = document.getElementById("next-mushroom-open-hint");
+const nextMushroomOpenNowDelayEl = document.getElementById("next-mushroom-open-now-delay");
+const gameLoadSecondsInput = document.getElementById("game-load-seconds-input");
+const refreshPeriodSecondsInput = document.getElementById("refresh-period-seconds-input");
+const biasModeButtons = Array.from(document.querySelectorAll(".bias-mode-btn"));
+const customBiasSecondsInput = document.getElementById("custom-bias-seconds-input");
+const customBiasWrapperEl = document.getElementById("custom-bias-wrapper");
 const leadSecondsInput = document.getElementById("lead-seconds-input");
 const leadAlertEnabledInput = document.getElementById("lead-alert-enabled");
 const leadAlertSettingEl = document.getElementById("lead-alert-setting");
@@ -36,6 +43,7 @@ const SYSTEM_NOTIFICATION_ENABLED_STORAGE_KEY = "pikmin-mushroom-system-notifica
 const ALERT_VOLUME_STORAGE_KEY = "pikmin-mushroom-alert-volume";
 const SORT_MODE_STORAGE_KEY = "pikmin-mushroom-sort-mode";
 const PROFILES_STORAGE_KEY = "pikmin-mushroom-profiles";
+const OPTIMAL_OPEN_STORAGE_KEY = "pikmin-mushroom-optimal-open-settings";
 
 const SORT_MODE_RESPAWN = "respawn";
 const SORT_MODE_CUSTOM = "custom";
@@ -52,9 +60,19 @@ const SOON_STATUS_WINDOW_SECONDS = 5 * 60;
 // 想改成重生前幾秒開始高亮，就改這個數字（目前是 10 秒）
 const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 
+// 「最佳開遊戲時機」校正：畫面刷新時間點 = gameLoadSeconds + refreshPeriodSeconds 之後，每 refreshPeriodSeconds 一次
+const DEFAULT_GAME_LOAD_SECONDS = 4;
+const DEFAULT_REFRESH_PERIOD_SECONDS = 8;
+const DEFAULT_OPEN_BIAS_MODE = "conservative";
+// 保守模式緩衝秒數：開太早會多等快一個刷新週期，開太晚頂多多等這幾秒，故意讓建議時機偏晚一點點
+const DEFAULT_CONSERVATIVE_BIAS_SECONDS = 1;
+const DEFAULT_CUSTOM_BIAS_SECONDS = 1;
+
 const floatingNextCardEl = document.getElementById("floating-next-card");
 const floatingNextNameEl = document.getElementById("floating-next-name");
 const floatingNextTimeEl = document.getElementById("floating-next-time");
+const floatingNextOpenHintEl = document.getElementById("floating-next-open-hint");
+const floatingNextOpenNowDelayEl = document.getElementById("floating-next-open-now-delay");
 
 const rows = [];
 let tags = [];
@@ -67,6 +85,7 @@ let frequentReminderEnabled = loadFrequentReminderEnabled();
 let systemNotificationEnabled = loadSystemNotificationEnabled();
 let alertVolume = loadAlertVolume();
 let currentSortMode = loadSortMode();
+let optimalOpenSettings = loadOptimalOpenSettings();
 let audioContext = null;
 let audioUnlocked = false;
 let audioHintShown = false;
@@ -90,6 +109,7 @@ function createRowData(createdSeq) {
         leadAlertDismissed: false,
         activeReminderToast: null,
         systemLeadNotificationSent: false,
+        workerScheduleActive: false,
         respawnHighlightTimeoutId: null,
         elements: null,
     };
@@ -373,6 +393,67 @@ function saveAlertVolume() {
     }
 }
 
+function sanitizeGameLoadSeconds(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_GAME_LOAD_SECONDS;
+    }
+    return clamp(Math.round(parsed), 0, 60);
+}
+
+function sanitizeRefreshPeriodSeconds(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_REFRESH_PERIOD_SECONDS;
+    }
+    return clamp(Math.round(parsed), 1, 60);
+}
+
+function sanitizeCustomBiasSeconds(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return DEFAULT_CUSTOM_BIAS_SECONDS;
+    }
+    return clamp(Math.round(parsed), 0, 30);
+}
+
+function sanitizeOpenBiasMode(value) {
+    return value === "precise" || value === "custom" ? value : "conservative";
+}
+
+function loadOptimalOpenSettings() {
+    const defaults = {
+        gameLoadSeconds: DEFAULT_GAME_LOAD_SECONDS,
+        refreshPeriodSeconds: DEFAULT_REFRESH_PERIOD_SECONDS,
+        biasMode: DEFAULT_OPEN_BIAS_MODE,
+        customBiasSeconds: DEFAULT_CUSTOM_BIAS_SECONDS,
+    };
+
+    try {
+        const raw = localStorage.getItem(OPTIMAL_OPEN_STORAGE_KEY);
+        if (raw === null) {
+            return defaults;
+        }
+
+        const parsed = JSON.parse(raw);
+        return {
+            gameLoadSeconds: sanitizeGameLoadSeconds(parsed.gameLoadSeconds),
+            refreshPeriodSeconds: sanitizeRefreshPeriodSeconds(parsed.refreshPeriodSeconds),
+            biasMode: sanitizeOpenBiasMode(parsed.biasMode),
+            customBiasSeconds: sanitizeCustomBiasSeconds(parsed.customBiasSeconds),
+        };
+    } catch {
+        return defaults;
+    }
+}
+
+function saveOptimalOpenSettings() {
+    try {
+        localStorage.setItem(OPTIMAL_OPEN_STORAGE_KEY, JSON.stringify(optimalOpenSettings));
+    } catch {
+        // ignore
+    }
+}
 
 function loadSortMode() {
     try {
@@ -443,6 +524,68 @@ function getSecondsUntilRespawn(row) {
 function isRowRespawned(row) {
     const respawnTimestamp = getRespawnTimestamp(row);
     return Number.isFinite(respawnTimestamp) && respawnTimestamp <= Date.now();
+}
+
+// 第一次刷新的時間點（開遊戲後幾秒看到那個畫面 + 之後的刷新週期）
+function getFirstRefreshSeconds() {
+    return optimalOpenSettings.gameLoadSeconds + optimalOpenSettings.refreshPeriodSeconds;
+}
+
+function getOpenBiasSeconds() {
+    if (optimalOpenSettings.biasMode === "precise") {
+        return 0;
+    }
+    if (optimalOpenSettings.biasMode === "custom") {
+        return optimalOpenSettings.customBiasSeconds;
+    }
+    return DEFAULT_CONSERVATIVE_BIAS_SECONDS;
+}
+
+// 建議在重生前幾秒開遊戲。刻意比理論最準的時機（第一次刷新秒數）少一點點，
+// 因為開太早會錯過第一次刷新、多等快一個刷新週期；開太晚頂多多等這個緩衝秒數。
+function getOptimalOpenLeadSeconds() {
+    return Math.max(0, getFirstRefreshSeconds() - getOpenBiasSeconds());
+}
+
+// 精準對齊刷新的開遊戲時機不是只有一個瞬間：只要「開遊戲倒數重生剩餘秒數」
+// 落在 baseLead, baseLead+P, baseLead+2P... 這個序列上都一樣準。序列裡最小的
+// baseLead（最貼近重生）之後不會再有更早對齊的機會了；更大的值代表更早開，
+// 誤差一樣小，但換來更多時間可以在遊戲裡找到蘑菇。
+// 這個函式回傳「目前為止最近一次已經到達的對齊時機」的秒數值，往後只會維持
+// 不變或往下跳到下一個更小的值，可以拿來判斷「是不是進入了新的一次機會」。
+function getMostRecentOptimalOpenCheckpointLead(secondsUntilRespawn) {
+    const baseLead = getOptimalOpenLeadSeconds();
+
+    if (!Number.isFinite(secondsUntilRespawn) || secondsUntilRespawn <= baseLead) {
+        return baseLead;
+    }
+
+    const period = optimalOpenSettings.refreshPeriodSeconds;
+    const steps = Math.ceil((secondsUntilRespawn - baseLead) / period);
+    return baseLead + steps * period;
+}
+
+// 如果「現在」開遊戲並持續開著，重生之後還要再等幾秒，畫面才會刷新確定看到。
+// 注意：這裡刻意回傳「重生後的額外等待秒數」（0 ~ 刷新週期-1 之間），而不是
+// 「從現在到看到結果的總秒數」——總秒數會因為每次都是假設「這一刻才開」而重新
+// 起算一輪新的刷新排程，導致數字每 8 秒才跳一次、中間 8 秒都不會變。額外等待
+// 秒數則會跟著時間流逝每秒平順遞減，不會卡住不動。
+function getIfOpenNowGapSeconds(respawnTimestamp, now = Date.now()) {
+    if (!respawnTimestamp) {
+        return null;
+    }
+
+    const firstRefreshSeconds = getFirstRefreshSeconds();
+    const period = optimalOpenSettings.refreshPeriodSeconds;
+    const secondsUntilRespawn = (respawnTimestamp - now) / 1000;
+
+    if (secondsUntilRespawn <= firstRefreshSeconds) {
+        return Math.max(0, firstRefreshSeconds - secondsUntilRespawn);
+    }
+
+    const cyclesNeeded = Math.ceil((secondsUntilRespawn - firstRefreshSeconds) / period);
+    const delaySeconds = firstRefreshSeconds + cyclesNeeded * period;
+    return delaySeconds - secondsUntilRespawn;
 }
 
 function getLeadReminderBucket(secondsUntilRespawn) {
@@ -690,6 +833,7 @@ function applyProfile(name) {
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
         postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+        maybeCancelWorkerSchedule(row);
         row.elements.wrapper.remove();
     });
     rows.length = 0;
@@ -826,6 +970,7 @@ function sendWorkerSchedule(row) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
 
+    row.workerScheduleActive = true;
     fetch(`${WORKER_URL}/api/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -844,6 +989,16 @@ function cancelWorkerSchedule(rowId) {
     fetch(`${WORKER_URL}/api/schedule/${clientId}/${rowId}`, {
         method: "DELETE",
     }).catch((e) => console.warn("無法取消推播排程", e));
+}
+
+// 只有「之前真的送過排程給 Worker」的蘑菇才需要送取消，避免每次編輯/切換設定
+// 都對從沒排程過的蘑菇白白發一次 DELETE，浪費 KV 額度。
+function maybeCancelWorkerSchedule(row) {
+    if (!row.workerScheduleActive) {
+        return;
+    }
+    row.workerScheduleActive = false;
+    cancelWorkerSchedule(row.id);
 }
 
 function postToSw(message) {
@@ -877,7 +1032,7 @@ function scheduleSwNotification(row) {
     const payload = getSwSchedulePayload(row);
     if (!payload) {
         postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
-        cancelWorkerSchedule(row.id);
+        maybeCancelWorkerSchedule(row);
         return;
     }
     // SW 負責提前通知，標記主執行緒不要重複發送
@@ -891,7 +1046,7 @@ function scheduleSwNotification(row) {
 function rescheduleAllSwNotifications() {
     if (!systemNotificationEnabled || Notification.permission !== "granted") {
         postToSw({ type: "CANCEL_ALL_NOTIFICATIONS" });
-        rows.forEach((row) => cancelWorkerSchedule(row.id));
+        rows.forEach(maybeCancelWorkerSchedule);
         return;
     }
     rows.forEach(scheduleSwNotification);
@@ -995,6 +1150,7 @@ function clearRespawnedRowInputs(row, { skipSave = false, skipNextCardUpdate = f
     row.leadAlertDismissed = false;
     row.systemLeadNotificationSent = false;
     postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+    maybeCancelWorkerSchedule(row);
 
     updateInputFieldsFromTarget(row);
     updateRowDisplay(row);
@@ -1551,6 +1707,49 @@ function getNextUpcomingRow() {
     return upcomingRows[0];
 }
 
+function getOptimalOpenHintText(respawnTimestamp) {
+    if (!respawnTimestamp) {
+        return "建議開遊戲：—";
+    }
+
+    const baseLead = getOptimalOpenLeadSeconds();
+    const rawSecondsUntilRespawn = (respawnTimestamp - Date.now()) / 1000;
+
+    if (rawSecondsUntilRespawn <= baseLead) {
+        return "現在開啟遊戲！";
+    }
+
+    const period = optimalOpenSettings.refreshPeriodSeconds;
+    const mostRecentLead = getMostRecentOptimalOpenCheckpointLead(rawSecondsUntilRespawn);
+    const nextCheckpointLead = mostRecentLead - period;
+    const nextCheckpointTimestamp = respawnTimestamp - nextCheckpointLead * 1000;
+    // 跟「重生時間」倒數用同一顆函式、同一種無條件進位法，避免兩個倒數在同一秒內
+    // 用不同瞬間跳動、看起來像是不同步。
+    const secondsUntilCheckpoint = getRemainingSecondsFromTarget(nextCheckpointTimestamp);
+
+    if (nextCheckpointLead <= baseLead) {
+        return `最後開啟機會：還有 ${formatDuration(secondsUntilCheckpoint)}（倒數剩 ${baseLead} 秒時開）`;
+    }
+
+    return `最佳開啟時機：還有 ${formatDuration(secondsUntilCheckpoint)}（之後每 ${period} 秒還有一次機會，最後機會在倒數剩 ${baseLead} 秒時）`;
+}
+
+function getOpenNowDelayText(respawnTimestamp) {
+    const gapSeconds = getIfOpenNowGapSeconds(respawnTimestamp);
+    if (gapSeconds === null) {
+        return "現在開啟：—";
+    }
+
+    // 跟 getRemainingSecondsFromTarget 用同一種無條件進位公式（把秒數當成毫秒代入），
+    // 確保這行文字跟「重生時間」「最佳開啟時機」在同一個瞬間跳動。
+    const roundedGap = Math.max(0, Math.floor((gapSeconds * 1000 + 999) / 1000));
+    if (roundedGap <= 0) {
+        return "現在開啟並保持開著：重生當下就會刷新看到";
+    }
+
+    return `現在開啟並保持開著：重生後約 ${roundedGap} 秒才會刷新看到`;
+}
+
 function updateNextMushroomCard() {
     if (!nextMushroomNameEl || !nextMushroomTimeEl) {
         return;
@@ -1562,11 +1761,24 @@ function updateNextMushroomCard() {
         nextMushroomNameEl.textContent = "地點：—";
         nextMushroomTimeEl.textContent = "重生時間：—（—）";
 
+        if (nextMushroomOpenHintEl) {
+            nextMushroomOpenHintEl.textContent = "建議開遊戲：—";
+        }
+        if (nextMushroomOpenNowDelayEl) {
+            nextMushroomOpenNowDelayEl.textContent = "現在開啟：—";
+        }
+
         if (floatingNextNameEl) {
             floatingNextNameEl.textContent = "地點：—";
         }
         if (floatingNextTimeEl) {
             floatingNextTimeEl.textContent = "重生：—（—）";
+        }
+        if (floatingNextOpenHintEl) {
+            floatingNextOpenHintEl.textContent = "建議開遊戲：—";
+        }
+        if (floatingNextOpenNowDelayEl) {
+            floatingNextOpenNowDelayEl.textContent = "現在開啟：—";
         }
         return;
     }
@@ -1577,15 +1789,30 @@ function updateNextMushroomCard() {
 
     const timeText = formatTaipeiTime(new Date(respawnTimestamp));
     const remainText = formatDuration(remainingSeconds);
+    const openHintText = getOptimalOpenHintText(respawnTimestamp);
+    const openNowDelayText = getOpenNowDelayText(respawnTimestamp);
 
     nextMushroomNameEl.textContent = `地點：${name}`;
     nextMushroomTimeEl.textContent = `重生時間：${timeText}（${remainText}）`;
+
+    if (nextMushroomOpenHintEl) {
+        nextMushroomOpenHintEl.textContent = openHintText;
+    }
+    if (nextMushroomOpenNowDelayEl) {
+        nextMushroomOpenNowDelayEl.textContent = openNowDelayText;
+    }
 
     if (floatingNextNameEl) {
         floatingNextNameEl.textContent = `地點：${name}`;
     }
     if (floatingNextTimeEl) {
         floatingNextTimeEl.textContent = `重生：${timeText}（${remainText}）`;
+    }
+    if (floatingNextOpenHintEl) {
+        floatingNextOpenHintEl.textContent = openHintText;
+    }
+    if (floatingNextOpenNowDelayEl) {
+        floatingNextOpenNowDelayEl.textContent = openNowDelayText;
     }
 }
 
@@ -1787,12 +2014,13 @@ function triggerReminderToast(row, secondsUntilRespawn) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const respawnTimestamp = getRespawnTimestamp(row);
     const respawnTimeText = formatTaipeiTime(new Date(respawnTimestamp));
+    const openHintText = getOptimalOpenHintText(respawnTimestamp);
 
     hideActiveReminderToast(row);
     playAlertSound("reminder");
     row.activeReminderToast = showToast(
         `還有 ${secondsUntilRespawn} 秒：${name}`,
-        `預計 ${respawnTimeText} 重生。\n按右上角 × 可停止這筆的提前提醒。`,
+        `預計 ${respawnTimeText} 重生。\n${openHintText}\n按右上角 × 可停止這筆的提前提醒。`,
         "warning",
         {
             durationMs: Math.max(1600, Math.min(secondsUntilRespawn * 1000, REMINDER_INTERVAL_SECONDS * 1000 - 250)),
@@ -1820,9 +2048,10 @@ function triggerLeadSystemNotification(row, secondsUntilRespawn) {
     }
 
     const respawnTimeText = formatTaipeiTime(new Date(respawnTimestamp));
+    const openHintText = getOptimalOpenHintText(respawnTimestamp);
     showSystemNotification(
         `還有 ${secondsUntilRespawn} 秒：${name}`,
-        `預計 ${respawnTimeText} 重生。`,
+        `預計 ${respawnTimeText} 重生。${openHintText}`,
         { tag: `pikmin-lead-${row.id}`, renotify: frequentReminderEnabled }
     );
 }
@@ -2127,6 +2356,46 @@ function applyAlertVolume(value, { silent = false } = {}) {
     }
 }
 
+function updateOptimalOpenSettingUI() {
+    if (gameLoadSecondsInput) {
+        gameLoadSecondsInput.value = String(optimalOpenSettings.gameLoadSeconds);
+    }
+    if (refreshPeriodSecondsInput) {
+        refreshPeriodSecondsInput.value = String(optimalOpenSettings.refreshPeriodSeconds);
+    }
+    biasModeButtons.forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.mode === optimalOpenSettings.biasMode);
+    });
+    if (customBiasSecondsInput) {
+        customBiasSecondsInput.value = String(optimalOpenSettings.customBiasSeconds);
+    }
+    if (customBiasWrapperEl) {
+        customBiasWrapperEl.classList.toggle("is-hidden", optimalOpenSettings.biasMode !== "custom");
+    }
+}
+
+function applyOptimalOpenSettings(partial, { silent = false } = {}) {
+    const merged = { ...optimalOpenSettings, ...partial };
+    optimalOpenSettings = {
+        gameLoadSeconds: sanitizeGameLoadSeconds(merged.gameLoadSeconds),
+        refreshPeriodSeconds: sanitizeRefreshPeriodSeconds(merged.refreshPeriodSeconds),
+        biasMode: sanitizeOpenBiasMode(merged.biasMode),
+        customBiasSeconds: sanitizeCustomBiasSeconds(merged.customBiasSeconds),
+    };
+
+    saveOptimalOpenSettings();
+    updateOptimalOpenSettingUI();
+    updateNextMushroomCard();
+
+    if (!silent) {
+        showToast(
+            "最佳開遊戲設定已更新",
+            `建議在重生前 ${getOptimalOpenLeadSeconds()} 秒開遊戲。`,
+            "info"
+        );
+    }
+}
+
 ensureCustomSortButton();
 
 window.addEventListener("scroll", updateFloatingNextCardVisibility);
@@ -2334,6 +2603,7 @@ function addRow(initialData = {}) {
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
         postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+        maybeCancelWorkerSchedule(row);
         wrapper.remove();
         normalizeCustomOrders();
 
@@ -2388,6 +2658,8 @@ function clearAllRows() {
     rows.forEach((row) => {
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
+        postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
+        maybeCancelWorkerSchedule(row);
         row.elements.wrapper.remove();
     });
     rows.length = 0;
@@ -2494,6 +2766,39 @@ if (alertVolumeInput) {
     });
 }
 
+if (gameLoadSecondsInput) {
+    gameLoadSecondsInput.addEventListener("change", () => {
+        applyOptimalOpenSettings({ gameLoadSeconds: gameLoadSecondsInput.value });
+    });
+    gameLoadSecondsInput.addEventListener("blur", () => {
+        applyOptimalOpenSettings({ gameLoadSeconds: gameLoadSecondsInput.value }, { silent: true });
+    });
+}
+
+if (refreshPeriodSecondsInput) {
+    refreshPeriodSecondsInput.addEventListener("change", () => {
+        applyOptimalOpenSettings({ refreshPeriodSeconds: refreshPeriodSecondsInput.value });
+    });
+    refreshPeriodSecondsInput.addEventListener("blur", () => {
+        applyOptimalOpenSettings({ refreshPeriodSeconds: refreshPeriodSecondsInput.value }, { silent: true });
+    });
+}
+
+biasModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+        applyOptimalOpenSettings({ biasMode: btn.dataset.mode });
+    });
+});
+
+if (customBiasSecondsInput) {
+    customBiasSecondsInput.addEventListener("change", () => {
+        applyOptimalOpenSettings({ customBiasSeconds: customBiasSecondsInput.value });
+    });
+    customBiasSecondsInput.addEventListener("blur", () => {
+        applyOptimalOpenSettings({ customBiasSeconds: customBiasSecondsInput.value }, { silent: true });
+    });
+}
+
 function updateAlertVolumeUIValueOnly(value) {
     const sanitized = sanitizeAlertVolume(value);
 
@@ -2538,6 +2843,7 @@ applyFrequentReminderEnabled(frequentReminderEnabled, { silent: true });
 applyAlertLeadSeconds(alertLeadSeconds, { silent: true });
 applyAlertVolume(alertVolume, { silent: true });
 applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
+applyOptimalOpenSettings(optimalOpenSettings, { silent: true });
 tags = loadTagsFromStorage();
 renderTags();
 profiles = loadProfilesFromStorage();
