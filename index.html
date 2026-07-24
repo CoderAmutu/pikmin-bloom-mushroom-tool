@@ -121,50 +121,6 @@
               </label>
             </div>
 
-            <div class="alert-setting optimal-open-setting" id="optimal-open-setting">
-              <div class="alert-setting-label">最佳開遊戲校正</div>
-
-              <div class="alert-setting-control optimal-open-bias-control">
-                <div class="bias-mode-tabs">
-                  <button type="button" class="btn-outline bias-mode-btn" data-mode="precise" title="開遊戲倒數剛好對齊刷新，誤差 0">精準</button>
-                  <button type="button" class="btn-outline bias-mode-btn" data-mode="conservative" title="預設。偏晚一點開，比較不怕手滑錯過">保守</button>
-                  <button type="button" class="btn-outline bias-mode-btn" data-mode="custom" title="自己輸入緩衝秒數">自訂</button>
-                </div>
-                <span class="custom-bias-wrapper" id="custom-bias-wrapper">
-                  <input
-                    type="number"
-                    id="custom-bias-seconds-input"
-                    min="0"
-                    max="30"
-                    step="1"
-                    inputmode="numeric"
-                  />
-                  <span>秒緩衝</span>
-                </span>
-              </div>
-
-              <div class="alert-setting-control optimal-open-control">
-                <input
-                  type="number"
-                  id="game-load-seconds-input"
-                  min="0"
-                  max="60"
-                  step="1"
-                  inputmode="numeric"
-                />
-                <span>秒看到畫面</span>
-                <input
-                  type="number"
-                  id="refresh-period-seconds-input"
-                  min="1"
-                  max="60"
-                  step="1"
-                  inputmode="numeric"
-                />
-                <span>秒刷新一次</span>
-              </div>
-            </div>
-
             <div class="alert-setting sound-setting">
               <div class="alert-setting-label">音效音量</div>
               <div class="alert-setting-control sound-setting-control">
@@ -179,6 +135,57 @@
               </div>
             </div>
 
+            <div class="alert-setting optimal-open-setting" id="optimal-open-setting">
+              <div class="alert-setting-label">最佳開遊戲校正</div>
+
+              <div class="alert-setting-control optimal-open-bias-control">
+                <div class="bias-mode-tabs">
+                  <button type="button" class="btn-outline bias-mode-btn" data-mode="conservative" title="預設。偏晚一點開，比較不怕手滑錯過">保守</button>
+                  <button type="button" class="btn-outline bias-mode-btn" data-mode="custom" title="自己輸入緩衝秒數">自訂</button>
+                </div>
+                <span class="custom-bias-wrapper" id="custom-bias-wrapper">
+                  <input
+                    type="number"
+                    id="custom-bias-seconds-input"
+                    min="0"
+                    max="30"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                  <span>秒緩衝</span>
+                </span>
+              </div>
+
+              <div class="alert-setting-control optimal-open-control">
+                <button
+                  type="button"
+                  class="btn-outline measure-load-btn"
+                  id="measure-load-btn"
+                  title="按一下開始計時、看到畫面再按一下，自動填入秒數"
+                >
+                  ⏱ 計時
+                </button>
+                <input
+                  type="number"
+                  id="game-load-seconds-input"
+                  min="0"
+                  max="60"
+                  step="0.01"
+                  inputmode="decimal"
+                />
+                <span>秒看到畫面</span>
+                <input
+                  type="number"
+                  id="refresh-period-seconds-input"
+                  min="1"
+                  max="60"
+                  step="0.01"
+                  inputmode="decimal"
+                />
+                <span>秒刷新一次</span>
+              </div>
+            </div>
+
             <button class="btn-outline" id="sort-btn">依重生時間排序</button>
           </div>
         </div>
@@ -187,6 +194,7 @@
       </div>
 
       <div class="bottom-actions">
+        <button class="btn-outline bottom-sort-btn" id="bottom-sort-btn">依重生時間排序</button>
         <button class="btn-primary" id="add-row-btn">＋ 新增一筆</button>
         <button class="btn-outline" id="copy-all-btn">全部複製</button>
         <button class="btn-outline btn-danger-soft" id="clear-all-btn">
@@ -196,6 +204,7 @@
       </div>
 
       <div class="footer-time" id="footer-time">現在時間：—（台北時間）</div>
+      <div class="sync-status is-pending" id="sync-status">⏳ 對時中…</div>
     </div>
 
     <div class="floating-next-card" id="floating-next-card">

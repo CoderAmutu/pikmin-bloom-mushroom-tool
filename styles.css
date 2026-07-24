@@ -343,6 +343,7 @@ body {
   gap: 10px 16px;
   padding: 10px 14px;
   flex-wrap: wrap;
+  flex: 1 1 100%;
 }
 
 .optimal-open-control {
@@ -399,14 +400,20 @@ body {
   margin: 0;
 }
 
+.sound-setting {
+  flex: 1 1 auto;
+}
+
 .sound-setting-control {
   min-width: 188px;
   min-height: 52px;
+  flex: 1;
 }
 
 .sound-setting-control input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
+  flex: 1;
   width: 120px;
   height: 36px;
   padding: 0;
@@ -765,6 +772,33 @@ button:disabled {
   }
 }
 
+/* 輸入太久（超過門檻）的蘑菇，整列橘色高亮閃爍，提醒可重新確認。
+   比重生前的綠色高亮稍慢、稍柔，代表「提醒」而非「緊急」。 */
+.mushroom-row.is-input-aged {
+  border-color: rgba(245, 158, 11, 0.72);
+  /* 想改閃動速度，就改這個 1.6s */
+  animation: inputAgedOrangeGlow 1.6s ease-in-out infinite;
+}
+
+@keyframes inputAgedOrangeGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(245, 158, 11, 0.16),
+      0 0 0 3px rgba(245, 158, 11, 0.07),
+      0 0 14px rgba(245, 158, 11, 0.16),
+      0 8px 18px rgba(180, 83, 9, 0.08);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(245, 158, 11, 0.36),
+      0 0 0 8px rgba(245, 158, 11, 0.18),
+      0 0 26px rgba(245, 158, 11, 0.4),
+      0 12px 26px rgba(180, 83, 9, 0.16);
+  }
+}
+
 .mushroom-row::before {
   content: "";
   position: absolute;
@@ -1012,6 +1046,10 @@ input:focus {
   flex-wrap: wrap;
 }
 
+.bottom-sort-btn {
+  margin-right: auto;
+}
+
 #copy-all-btn {
   background: linear-gradient(180deg, #fff8d9 0%, #ffef9c 100%);
   border: 1px solid rgba(255, 216, 77, 0.65);
@@ -1030,6 +1068,76 @@ input:focus {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+}
+
+.sync-status {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 6px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.sync-status.is-ok {
+  color: #d3ffd0;
+}
+
+.sync-status.is-pending {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sync-status.is-stale {
+  color: #ffe08a;
+}
+
+.row-input-age {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+/* 還沒設定時間的空列就整行收合，不佔位、不影響對齊。 */
+.row-input-age.is-hidden {
+  display: none;
+}
+
+.row-input-age.is-aged .row-input-age-text {
+  color: #b45309;
+}
+
+.row-input-age-confirm {
+  min-height: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid #9fd57e;
+  background: linear-gradient(180deg, #f4ffe9 0%, #ddf7bf 100%);
+  color: #2b7a2b;
+}
+
+.row-input-age-confirm[hidden] {
+  display: none;
+}
+
+.measure-load-btn {
+  min-height: 0;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.measure-load-btn.is-timing {
+  border-color: #f0a13a;
+  background: linear-gradient(180deg, #fff6e8 0%, #ffe6c2 100%);
+  color: #b45309;
 }
 
 @media (max-width: 980px) {

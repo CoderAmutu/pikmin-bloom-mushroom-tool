@@ -4,6 +4,7 @@ const taipeiNowEl = document.getElementById("taipei-now");
 const footerTimeEl = document.getElementById("footer-time");
 const tagListEl = document.getElementById("tag-list");
 const sortBtn = document.getElementById("sort-btn");
+const bottomSortBtn = document.getElementById("bottom-sort-btn");
 const copyAllBtn = document.getElementById("copy-all-btn");
 const clearAllBtn = document.getElementById("clear-all-btn");
 const nextMushroomNameEl = document.getElementById("next-mushroom-name");
@@ -15,6 +16,7 @@ const refreshPeriodSecondsInput = document.getElementById("refresh-period-second
 const biasModeButtons = Array.from(document.querySelectorAll(".bias-mode-btn"));
 const customBiasSecondsInput = document.getElementById("custom-bias-seconds-input");
 const customBiasWrapperEl = document.getElementById("custom-bias-wrapper");
+const measureLoadBtn = document.getElementById("measure-load-btn");
 const leadSecondsInput = document.getElementById("lead-seconds-input");
 const leadAlertEnabledInput = document.getElementById("lead-alert-enabled");
 const leadAlertSettingEl = document.getElementById("lead-alert-setting");
@@ -23,6 +25,7 @@ const systemNotificationEnabledInput = document.getElementById("system-notificat
 const alertVolumeInput = document.getElementById("alert-volume-input");
 const alertVolumeTextEl = document.getElementById("alert-volume-text");
 const toastStackEl = document.getElementById("toast-stack");
+const syncStatusEl = document.getElementById("sync-status");
 
 let customSortBtn = null;
 let deferredInstallPrompt = null;
@@ -59,6 +62,10 @@ const REMINDER_INTERVAL_SECONDS = 5;
 const SOON_STATUS_WINDOW_SECONDS = 5 * 60;
 // 想改成重生前幾秒開始高亮，就改這個數字（目前是 10 秒）
 const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
+
+// 蘑菇輸入超過這麼多分鐘後，用溫和的琥珀色提示「要極致精準可重新確認」。
+// 注意：這只是提醒，工具的預測本身有網路對時撐著、不會因為放久了就變差。
+const INPUT_AGE_HINT_MINUTES = 10;
 
 // 「最佳開遊戲時機」校正：畫面刷新時間點 = gameLoadSeconds + refreshPeriodSeconds 之後，每 refreshPeriodSeconds 一次
 const DEFAULT_GAME_LOAD_SECONDS = 4;
@@ -102,6 +109,7 @@ function createRowData(createdSeq) {
         createdSeq: finalCreatedSeq,
         customOrder: finalCreatedSeq,
         targetTimestamp: null,
+        inputAt: null,
         respawnState: false,
         lastRespawnTimestamp: null,
         respawnTriggered: false,
@@ -178,8 +186,73 @@ function updateRangeProgress(inputEl, value) {
     inputEl.style.setProperty("--range-progress", `${progress}%`);
 }
 
+// --- 網路對時：用 Worker 回傳的伺服器時間校準本機時鐘 ---
+// 工具跑在電腦、遊戲跑在手機，兩個時鐘會慢慢走開。這裡量出「伺服器精確時間
+// 與本機時鐘的差」，之後所有跟倒數/重生有關的時間計算都改用 getAccurateNow()，
+// 讓工具跟遊戲一起對齊到伺服器時間，不受本機時鐘準不準影響。
+const TIME_SYNC_ENDPOINT = `${WORKER_URL}/api/time`;
+const TIME_SYNC_INTERVAL_MS = 3 * 60 * 1000;
+// 對時被視為「過期」的時間：超過這麼久沒成功對時，指示器就轉為警示。
+const TIME_SYNC_STALE_MS = TIME_SYNC_INTERVAL_MS * 2 + 30 * 1000;
+let timeOffsetMs = 0; // 伺服器精確時間 − 本機 Date.now()
+let lastTimeSyncLocalAt = 0; // 上次成功對時的本機時間（0 = 從未成功）
+let lastTimeSyncOffsetMs = 0; // 上次成功對時量到的本機時鐘偏差
+
+function getAccurateNow() {
+    return Date.now() + timeOffsetMs;
+}
+
+async function syncTimeOffset() {
+    try {
+        const t0 = Date.now();
+        const res = await fetch(TIME_SYNC_ENDPOINT, { cache: "no-store" });
+        const t1 = Date.now();
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (typeof data.now !== "number") return;
+
+        // 用往返時間的一半補償網路延遲，估算「回應抵達當下」的伺服器精確時間。
+        const roundTripMs = t1 - t0;
+        const estimatedServerNowAtT1 = data.now + roundTripMs / 2;
+        timeOffsetMs = estimatedServerNowAtT1 - t1;
+        lastTimeSyncLocalAt = t1;
+        lastTimeSyncOffsetMs = timeOffsetMs;
+        updateTimeSyncIndicator();
+    } catch {
+        // 抓不到就沿用前一次的校準值（初始為 0，即退回本機時鐘），不影響運作。
+    }
+}
+
+function updateTimeSyncIndicator() {
+    if (!syncStatusEl) {
+        return;
+    }
+
+    if (lastTimeSyncLocalAt === 0) {
+        syncStatusEl.className = "sync-status is-pending";
+        syncStatusEl.textContent = "⏳ 對時中…";
+        return;
+    }
+
+    const sinceLastSyncMs = Date.now() - lastTimeSyncLocalAt;
+    if (sinceLastSyncMs > TIME_SYNC_STALE_MS) {
+        syncStatusEl.className = "sync-status is-stale";
+        syncStatusEl.textContent = "⚠ 對時可能過期，暫用本機時鐘";
+        return;
+    }
+
+    // 本機時鐘偏差多大就顯示多少，讓你知道「工具正在幫你補掉這個誤差」。
+    const absOffset = Math.abs(Math.round(lastTimeSyncOffsetMs));
+    syncStatusEl.className = "sync-status is-ok";
+    syncStatusEl.textContent =
+        absOffset <= 50
+            ? "✓ 已與伺服器對時（本機時鐘很準）"
+            : `✓ 已與伺服器對時（本機時鐘偏差 ${absOffset} 毫秒，已自動校正）`;
+}
+
 function getTaipeiNow() {
-    return new Date();
+    return new Date(getAccurateNow());
 }
 
 function formatTaipeiDateTime(date) {
@@ -242,6 +315,7 @@ function loadRowsFromStorage() {
                 name: String(item.name || "").trim(),
                 targetTimestamp:
                     typeof item.targetTimestamp === "number" ? item.targetTimestamp : null,
+                inputAt: typeof item.inputAt === "number" ? item.inputAt : null,
                 respawnState: item.respawnState === true,
                 lastRespawnTimestamp:
                     typeof item.lastRespawnTimestamp === "number"
@@ -270,6 +344,7 @@ function saveRowsToStorage() {
         const payload = rows.map((row) => ({
             name: row.elements.nameInput.value.trim(),
             targetTimestamp: row.targetTimestamp,
+            inputAt: row.inputAt,
             respawnState: row.respawnState === true,
             lastRespawnTimestamp: row.lastRespawnTimestamp,
             createdSeq: row.createdSeq,
@@ -393,12 +468,18 @@ function saveAlertVolume() {
     }
 }
 
+// 校正值支援到小數點後兩位（例如碼表量到的 2.69 秒），因為「現在開啟遊戲！」
+// 的觸發時機在背後是用帶小數的精確運算算的，小數會讓觸發點更貼近實測。
+function roundTo2(n) {
+    return Math.round(n * 100) / 100;
+}
+
 function sanitizeGameLoadSeconds(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
         return DEFAULT_GAME_LOAD_SECONDS;
     }
-    return clamp(Math.round(parsed), 0, 60);
+    return clamp(roundTo2(parsed), 0, 60);
 }
 
 function sanitizeRefreshPeriodSeconds(value) {
@@ -406,7 +487,7 @@ function sanitizeRefreshPeriodSeconds(value) {
     if (!Number.isFinite(parsed)) {
         return DEFAULT_REFRESH_PERIOD_SECONDS;
     }
-    return clamp(Math.round(parsed), 1, 60);
+    return clamp(roundTo2(parsed), 1, 60);
 }
 
 function sanitizeCustomBiasSeconds(value) {
@@ -414,11 +495,11 @@ function sanitizeCustomBiasSeconds(value) {
     if (!Number.isFinite(parsed)) {
         return DEFAULT_CUSTOM_BIAS_SECONDS;
     }
-    return clamp(Math.round(parsed), 0, 30);
+    return clamp(roundTo2(parsed), 0, 30);
 }
 
 function sanitizeOpenBiasMode(value) {
-    return value === "precise" || value === "custom" ? value : "conservative";
+    return value === "custom" ? value : "conservative";
 }
 
 function loadOptimalOpenSettings() {
@@ -508,7 +589,7 @@ function getRemainingSecondsFromTarget(targetTimestamp) {
         return 0;
     }
 
-    const diffMs = targetTimestamp - Date.now();
+    const diffMs = targetTimestamp - getAccurateNow();
     return Math.max(0, Math.floor((diffMs + 999) / 1000));
 }
 
@@ -523,7 +604,7 @@ function getSecondsUntilRespawn(row) {
 
 function isRowRespawned(row) {
     const respawnTimestamp = getRespawnTimestamp(row);
-    return Number.isFinite(respawnTimestamp) && respawnTimestamp <= Date.now();
+    return Number.isFinite(respawnTimestamp) && respawnTimestamp <= getAccurateNow();
 }
 
 // 第一次刷新的時間點（開遊戲後幾秒看到那個畫面 + 之後的刷新週期）
@@ -532,9 +613,6 @@ function getFirstRefreshSeconds() {
 }
 
 function getOpenBiasSeconds() {
-    if (optimalOpenSettings.biasMode === "precise") {
-        return 0;
-    }
     if (optimalOpenSettings.biasMode === "custom") {
         return optimalOpenSettings.customBiasSeconds;
     }
@@ -570,7 +648,7 @@ function getMostRecentOptimalOpenCheckpointLead(secondsUntilRespawn) {
 // 「從現在到看到結果的總秒數」——總秒數會因為每次都是假設「這一刻才開」而重新
 // 起算一輪新的刷新排程，導致數字每 8 秒才跳一次、中間 8 秒都不會變。額外等待
 // 秒數則會跟著時間流逝每秒平順遞減，不會卡住不動。
-function getIfOpenNowGapSeconds(respawnTimestamp, now = Date.now()) {
+function getIfOpenNowGapSeconds(respawnTimestamp, now = getAccurateNow()) {
     if (!respawnTimestamp) {
         return null;
     }
@@ -965,7 +1043,7 @@ async function subscribeToPushIfNeeded() {
 function sendWorkerSchedule(row) {
     if (!systemNotificationEnabled || Notification.permission !== "granted") return;
     const respawnTimestamp = getRespawnTimestamp(row);
-    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return;
+    if (!respawnTimestamp || respawnTimestamp <= getAccurateNow()) return;
 
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
@@ -979,7 +1057,7 @@ function sendWorkerSchedule(row) {
             rowId: row.id,
             name,
             respawnTimestamp,
-            leadTimestamp: leadMs && leadMs > Date.now() ? leadMs : null,
+            leadTimestamp: leadMs && leadMs > getAccurateNow() ? leadMs : null,
         }),
     }).catch((e) => console.warn("無法排程推播", e));
 }
@@ -1013,7 +1091,7 @@ function postToSw(message) {
 function getSwSchedulePayload(row) {
     if (!systemNotificationEnabled || Notification.permission !== "granted") return null;
     const respawnTimestamp = getRespawnTimestamp(row);
-    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return null;
+    if (!respawnTimestamp || respawnTimestamp <= getAccurateNow()) return null;
 
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
@@ -1023,7 +1101,7 @@ function getSwSchedulePayload(row) {
         rowId: row.id,
         name,
         respawnTimestamp,
-        leadTimestamp: leadMs && leadMs > Date.now() ? leadMs : null,
+        leadTimestamp: leadMs && leadMs > getAccurateNow() ? leadMs : null,
         notificationUrl: window.location.href,
     };
 }
@@ -1144,6 +1222,7 @@ function clearRespawnedRowInputs(row, { skipSave = false, skipNextCardUpdate = f
 
     row.lastRespawnTimestamp = getRespawnTimestamp(row);
     row.targetTimestamp = null;
+    row.inputAt = null;
     row.respawnState = true;
     row.respawnTriggered = true;
     row.lastReminderBucket = null;
@@ -1172,7 +1251,8 @@ function syncRowTimer(row) {
     // 使用者一旦開始重新編輯時間，就清除「已重生」保留狀態。
     row.respawnState = false;
     row.lastRespawnTimestamp = null;
-    row.targetTimestamp = totalSeconds > 0 ? Date.now() + totalSeconds * 1000 : null;
+    row.targetTimestamp = totalSeconds > 0 ? getAccurateNow() + totalSeconds * 1000 : null;
+    row.inputAt = row.targetTimestamp ? getAccurateNow() : null;
 
     resetRowAlertState(row);
     updateRowDisplay(row);
@@ -1233,9 +1313,49 @@ function updateRowStatusUI(row) {
     row.elements.wrapper.dataset.rowStatus = status.key;
 }
 
+function updateInputAgeDisplay(row) {
+    const el = row.elements?.inputAgeEl;
+    const textEl = row.elements?.inputAgeText;
+    const confirmBtn = row.elements?.confirmAgeBtn;
+    const wrapper = row.elements?.wrapper;
+    if (!el || !textEl) {
+        return;
+    }
+
+    if (!row.targetTimestamp || !row.inputAt) {
+        el.classList.add("is-hidden");
+        el.classList.remove("is-aged");
+        textEl.textContent = "";
+        if (confirmBtn) confirmBtn.hidden = true;
+        wrapper?.classList.remove("is-input-aged");
+        return;
+    }
+
+    el.classList.remove("is-hidden");
+    const ageMinutes = Math.floor((getAccurateNow() - row.inputAt) / 60000);
+    const ageText = ageMinutes < 1 ? "剛剛輸入" : `輸入於 ${ageMinutes} 分鐘前`;
+    const isAged = ageMinutes >= INPUT_AGE_HINT_MINUTES;
+
+    if (isAged) {
+        el.classList.add("is-aged");
+        textEl.textContent = `${ageText}・要極致精準可重新確認一次`;
+        if (confirmBtn) confirmBtn.hidden = false;
+    } else {
+        el.classList.remove("is-aged");
+        textEl.textContent = ageText;
+        if (confirmBtn) confirmBtn.hidden = true;
+    }
+
+    // 橘色高亮閃爍，讓你不用讀字、看到在閃就知道該重新確認。
+    // 但「重生前綠色高亮」更緊急，若同時成立就讓綠色優先、兩者不同時閃。
+    const shouldFlashOrange = isAged && !shouldHighlightBeforeRespawn(row);
+    wrapper?.classList.toggle("is-input-aged", shouldFlashOrange);
+}
+
 function updateRowDisplay(row) {
     updateRowStatusUI(row);
     updateRespawnHighlight(row);
+    updateInputAgeDisplay(row);
 
     if (row.respawnState && !row.targetTimestamp) {
         row.elements.countdownBox.textContent = "00:00:00";
@@ -1402,6 +1522,11 @@ function updateSortButtonsUI() {
         sortBtn.disabled = false;
         sortBtn.classList.toggle("is-active", currentSortMode === SORT_MODE_RESPAWN);
         sortBtn.setAttribute("aria-pressed", currentSortMode === SORT_MODE_RESPAWN ? "true" : "false");
+    }
+
+    if (bottomSortBtn) {
+        bottomSortBtn.classList.toggle("is-active", currentSortMode === SORT_MODE_RESPAWN);
+        bottomSortBtn.setAttribute("aria-pressed", currentSortMode === SORT_MODE_RESPAWN ? "true" : "false");
     }
 
     if (customSortBtn) {
@@ -1631,7 +1756,7 @@ function ensureCustomSortButton() {
 
 function sortRowsByRespawnTime(options = {}) {
     const { persistMode = true } = options;
-    const now = Date.now();
+    const now = getAccurateNow();
 
     rows.sort((a, b) => {
         const aRespawn = getRespawnTimestamp(a);
@@ -1692,7 +1817,7 @@ function getRowCopyText(row) {
 }
 
 function getNextUpcomingRow() {
-    const now = Date.now();
+    const now = getAccurateNow();
 
     const upcomingRows = rows.filter((row) => {
         const respawnTimestamp = getRespawnTimestamp(row);
@@ -1713,25 +1838,46 @@ function getOptimalOpenHintText(respawnTimestamp) {
     }
 
     const baseLead = getOptimalOpenLeadSeconds();
-    const rawSecondsUntilRespawn = (respawnTimestamp - Date.now()) / 1000;
+    const rawSecondsUntilRespawn = (respawnTimestamp - getAccurateNow()) / 1000;
 
     if (rawSecondsUntilRespawn <= baseLead) {
-        return "現在開啟遊戲！";
+        return "現在開啟遊戲！（最後機會，重生前已經沒有更早的對齊時機了）";
     }
 
+    const bias = getOpenBiasSeconds();
     const period = optimalOpenSettings.refreshPeriodSeconds;
     const mostRecentLead = getMostRecentOptimalOpenCheckpointLead(rawSecondsUntilRespawn);
     const nextCheckpointLead = mostRecentLead - period;
-    const nextCheckpointTimestamp = respawnTimestamp - nextCheckpointLead * 1000;
-    // 跟「重生時間」倒數用同一顆函式、同一種無條件進位法，避免兩個倒數在同一秒內
-    // 用不同瞬間跳動、看起來像是不同步。
-    const secondsUntilCheckpoint = getRemainingSecondsFromTarget(nextCheckpointTimestamp);
+    // 安全視窗的「上緣」＝理論最準時機（倒數剛好對齊刷新的那一刻）。倒數文字
+    // 數到這裡才切成「現在開啟遊戲！」，不會提早把視窗上緣那段時間也算進安
+    // 全範圍，確保使用者一定會先看到「1」倒數完，才看到訊息切換。
+    const windowTopLead = nextCheckpointLead + bias;
 
-    if (nextCheckpointLead <= baseLead) {
-        return `最後開啟機會：還有 ${formatDuration(secondsUntilCheckpoint)}（倒數剩 ${baseLead} 秒時開）`;
+    // 這次機會的安全視窗正開著：現在按下去都還來得及對齊，視窗會維持
+    // bias 秒之久，過了這個視窗還沒按，就會直接摔進下一輪的等待，不會有
+    // 「越接近越好」這種漸進感。
+    if (rawSecondsUntilRespawn <= windowTopLead) {
+        if (nextCheckpointLead <= baseLead) {
+            return "現在開啟遊戲！（最後機會，重生前已經沒有更早的對齊時機了）";
+        }
+        return `現在開啟遊戲！（這次機會重生前還有 ${Math.round(nextCheckpointLead)} 秒，時間充裕）`;
     }
 
-    return `最佳開啟時機：還有 ${formatDuration(secondsUntilCheckpoint)}（之後每 ${period} 秒還有一次機會，最後機會在倒數剩 ${baseLead} 秒時）`;
+    const windowTopTimestamp = respawnTimestamp - windowTopLead * 1000;
+    // 跟「重生時間」倒數用同一顆函式、同一種無條件進位法，避免兩個倒數在同一秒內
+    // 用不同瞬間跳動、看起來像是不同步。
+    const secondsUntilCheckpoint = getRemainingSecondsFromTarget(windowTopTimestamp);
+
+    // baseLead / period 可能是小數，但這裡是給人對照「整秒倒數」用的引導文字，
+    // 所以四捨五入到整數顯示，精確的觸發仍由上面的安全視窗判斷處理。
+    const baseLeadText = Math.round(baseLead);
+    const periodText = Math.round(period);
+
+    if (nextCheckpointLead <= baseLead) {
+        return `最後開啟機會：還有 ${formatDuration(secondsUntilCheckpoint)}（倒數剩 ${baseLeadText} 秒時開）`;
+    }
+
+    return `最佳開啟時機：還有 ${formatDuration(secondsUntilCheckpoint)}（之後每 ${periodText} 秒還有一次機會，最後機會在倒數剩 ${baseLeadText} 秒時）`;
 }
 
 function getOpenNowDelayText(respawnTimestamp) {
@@ -2458,6 +2604,16 @@ function addRow(initialData = {}) {
     const respawnBox = document.createElement("div");
     respawnBox.className = "respawn-box";
     respawnBox.textContent = "—";
+    const inputAgeEl = document.createElement("div");
+    inputAgeEl.className = "row-input-age is-hidden";
+    const inputAgeText = document.createElement("span");
+    inputAgeText.className = "row-input-age-text";
+    const confirmAgeBtn = document.createElement("button");
+    confirmAgeBtn.type = "button";
+    confirmAgeBtn.className = "row-input-age-confirm";
+    confirmAgeBtn.textContent = "✓ 確認無誤";
+    confirmAgeBtn.hidden = true;
+    inputAgeEl.append(inputAgeText, confirmAgeBtn);
     respawnField.append(respawnLabel, respawnBox);
 
     const actionField = document.createElement("div");
@@ -2498,7 +2654,7 @@ function addRow(initialData = {}) {
     rowActionsBottom.append(copyBtn, removeBtn);
     actionField.append(addTagBtn, rowMoveControls, rowActionsBottom);
 
-    rowMain.append(nameField, timeField, countdownField, respawnField);
+    rowMain.append(nameField, timeField, countdownField, respawnField, inputAgeEl);
     wrapper.append(indexEl, rowMain, actionField);
     rowList.appendChild(wrapper);
 
@@ -2512,6 +2668,9 @@ function addRow(initialData = {}) {
         countdownBox,
         respawnBox,
         respawnLabel,
+        inputAgeEl,
+        inputAgeText,
+        confirmAgeBtn,
         statusBadge,
         addTagBtn,
         moveControls: rowMoveControls,
@@ -2524,6 +2683,10 @@ function addRow(initialData = {}) {
     row.targetTimestamp =
         typeof initialData.targetTimestamp === "number"
             ? initialData.targetTimestamp
+            : null;
+    row.inputAt =
+        row.targetTimestamp && typeof initialData.inputAt === "number"
+            ? initialData.inputAt
             : null;
     row.respawnState = initialData.respawnState === true;
     row.lastRespawnTimestamp =
@@ -2545,6 +2708,18 @@ function addRow(initialData = {}) {
     nameInput.addEventListener("input", () => {
         updateNextMushroomCard();
         saveRowsToStorage();
+    });
+
+    // 「確認無誤」：不用重新輸入時間，只把「上次確認時間」更新成現在，
+    // 橘色提醒消失、重新計時 10 分鐘。
+    confirmAgeBtn.addEventListener("click", () => {
+        if (!row.targetTimestamp) {
+            return;
+        }
+        row.inputAt = getAccurateNow();
+        updateRowDisplay(row);
+        saveRowsToStorage();
+        showToast("已確認資料無誤", "重新計時，橘色提醒先消失。", "info");
     });
 
     indexEl.addEventListener("click", () => {
@@ -2686,12 +2861,20 @@ function tick() {
     rows.forEach(updateRowDisplay);
     checkAndFireAlerts();
     updateNextMushroomCard();
+    updateTimeSyncIndicator();
 }
 
 if (sortBtn) {
     sortBtn.addEventListener("click", () => {
         sortRowsByRespawnTime();
         flashButton(sortBtn, "已排序");
+    });
+}
+
+if (bottomSortBtn) {
+    bottomSortBtn.addEventListener("click", () => {
+        sortRowsByRespawnTime();
+        flashButton(bottomSortBtn, "已排序");
     });
 }
 
@@ -2799,6 +2982,53 @@ if (customBiasSecondsInput) {
     });
 }
 
+// 「計時看到畫面」碼表：按一下開始、看到畫面再按一下停止，自動把秒數填進校正欄位。
+// 量的是「經過多久」，所以用 performance.now()（單調時鐘，不受系統對時影響）。
+let loadStopwatchStart = null;
+let loadStopwatchRafId = null;
+
+function stopLoadStopwatchTicker() {
+    if (loadStopwatchRafId !== null) {
+        cancelAnimationFrame(loadStopwatchRafId);
+        loadStopwatchRafId = null;
+    }
+}
+
+function updateMeasureLoadBtnLabel() {
+    if (!measureLoadBtn) return;
+    if (loadStopwatchStart === null) {
+        measureLoadBtn.textContent = "⏱ 計時";
+        measureLoadBtn.classList.remove("is-timing");
+        return;
+    }
+    const elapsed = (performance.now() - loadStopwatchStart) / 1000;
+    measureLoadBtn.textContent = `⏹ 停止 ${elapsed.toFixed(2)} 秒`;
+    measureLoadBtn.classList.add("is-timing");
+    loadStopwatchRafId = requestAnimationFrame(updateMeasureLoadBtnLabel);
+}
+
+function toggleLoadStopwatch() {
+    if (loadStopwatchStart === null) {
+        // 開始計時
+        loadStopwatchStart = performance.now();
+        updateMeasureLoadBtnLabel();
+        return;
+    }
+
+    // 停止：算出經過秒數、填入「看到畫面秒數」並套用
+    const elapsedSeconds = roundTo2((performance.now() - loadStopwatchStart) / 1000);
+    loadStopwatchStart = null;
+    stopLoadStopwatchTicker();
+    updateMeasureLoadBtnLabel();
+
+    applyOptimalOpenSettings({ gameLoadSeconds: elapsedSeconds });
+    showToast("已量到看到畫面時間", `填入 ${elapsedSeconds.toFixed(2)} 秒。多量幾次取平均會更準。`, "info");
+}
+
+if (measureLoadBtn) {
+    measureLoadBtn.addEventListener("click", toggleLoadStopwatch);
+}
+
 function updateAlertVolumeUIValueOnly(value) {
     const sanitized = sanitizeAlertVolume(value);
 
@@ -2857,3 +3087,13 @@ if (currentSortMode === SORT_MODE_CUSTOM) {
 updateSortButtonsUI();
 tick();
 setInterval(tick, 200);
+
+// 一載入就先對時，之後每隔一段時間再校準一次，讓本機時鐘的緩慢漂移能被追上。
+// 抓不到時間端點（離線、或 Worker 還沒加這個端點）會自動退回本機時鐘，不影響運作。
+syncTimeOffset();
+setInterval(syncTimeOffset, TIME_SYNC_INTERVAL_MS);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        syncTimeOffset();
+    }
+});
