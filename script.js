@@ -63,8 +63,8 @@ const SOON_STATUS_WINDOW_SECONDS = 5 * 60;
 // 想改成重生前幾秒開始高亮，就改這個數字（目前是 10 秒）
 const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 
-// 蘑菇輸入超過這麼多分鐘後，用溫和的琥珀色提示「要極致精準可重新確認」。
-// 注意：這只是提醒，工具的預測本身有網路對時撐著、不會因為放久了就變差。
+// 資料放超過這麼多分鐘才算「舊到值得重新確認」。單獨成立不會提醒，
+// 必須同時落在下面的最後校正窗口內才會催你（見 updateInputAgeDisplay）。
 const INPUT_AGE_HINT_MINUTES = 10;
 
 // 「最後校正窗口」：被摧毀前這幾分鐘。摧毀後蘑菇從遊戲裡消失、再也讀不到時間，
@@ -1406,7 +1406,11 @@ function updateInputAgeDisplay(row) {
     const ageText = ageMinutes < 1 ? "剛剛輸入" : `輸入於 ${ageMinutes} 分鐘前`;
     const isAged = ageMinutes >= INPUT_AGE_HINT_MINUTES;
     const destroyed = isRowDestroyed(row);
-    const inWindow = isInLastCalibrationWindow(row);
+
+    // 要不要叫你去重新確認：只在「最後校正窗口內、而且資料已經放很久」才成立。
+    // 窗口外還來得及，現在吵沒意義；摧毀後已經來不及，吵了也補救不了。
+    // 窗口內按過確認就自動解除（inputAt 更新後 isAged 變回 false）。
+    const needsCalibration = isAged && isInLastCalibrationWindow(row);
 
     if (destroyed) {
         // 摧毀後蘑菇從遊戲裡消失，已經沒得再確認，所以不再叫人去確認，
@@ -1418,25 +1422,21 @@ function updateInputAgeDisplay(row) {
             ? `${ageText}・摧毀前已重新確認過，重生時間可信`
             : `${ageText}・摧毀前沒有重新確認，重生時間可能有誤差`;
         if (confirmBtn) confirmBtn.hidden = true;
-    } else if (isAged) {
+    } else if (needsCalibration) {
         el.classList.add("is-aged");
         el.classList.remove("is-uncalibrated");
-        textEl.textContent = inWindow
-            ? `${ageText}・最後校正機會，摧毀後就沒得確認了`
-            : `${ageText}・要極致精準可重新確認一次`;
+        textEl.textContent = `${ageText}・最後校正機會，摧毀後就沒得確認了`;
         if (confirmBtn) confirmBtn.hidden = false;
     } else {
+        // 窗口外只中性地報「輸入於幾分鐘前」，不上色、不出按鈕、不催你。
         el.classList.remove("is-aged", "is-uncalibrated");
         textEl.textContent = ageText;
         if (confirmBtn) confirmBtn.hidden = true;
     }
 
     // 橘色高亮閃爍，讓你不用讀字、看到在閃就知道該去重新確認。
-    // 只在最後校正窗口內閃：倒數還久不用急，摧毀後閃了也補救不了。
-    // 窗口內按過確認就不再閃（inputAt 更新後 isAged 會變 false）。
     // 摧毀後才會出現的「重生前綠色高亮」跟這裡天生互斥，不必再判一次。
-    const shouldFlashOrange = isAged && inWindow;
-    wrapper?.classList.toggle("is-input-aged", shouldFlashOrange);
+    wrapper?.classList.toggle("is-input-aged", needsCalibration);
 }
 
 function updateRowDisplay(row) {
