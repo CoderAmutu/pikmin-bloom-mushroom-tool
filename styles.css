@@ -772,8 +772,8 @@ button:disabled {
   }
 }
 
-/* 輸入太久（超過門檻）的蘑菇，整列橘色高亮閃爍，提醒可重新確認。
-   比重生前的綠色高亮稍慢、稍柔，代表「提醒」而非「緊急」。 */
+/* 輸入太久（超過門檻）且快被摧毀的蘑菇，整列橘色高亮閃爍，提醒可重新確認。
+   倒數還久或已重生都不閃。比重生前的綠色高亮稍慢、稍柔，代表「提醒」而非「緊急」。 */
 .mushroom-row.is-input-aged {
   border-color: rgba(245, 158, 11, 0.72);
   /* 想改閃動速度，就改這個 1.6s */
@@ -1109,6 +1109,12 @@ input:focus {
 
 .row-input-age.is-aged .row-input-age-text {
   color: #b45309;
+}
+
+/* 摧毀前沒重新確認過，重生時間可能有偏差。這時已經補救不了，
+   所以不閃、只用紅字把話講明，讓你抓重生時間時心裡有底。 */
+.row-input-age.is-uncalibrated .row-input-age-text {
+  color: #c2410c;
 }
 
 .row-input-age-confirm {

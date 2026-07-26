@@ -1,4 +1,4 @@
-const CACHE_NAME = "pikmin-mushroom-v1";
+const CACHE_NAME = "pikmin-mushroom-v2";
 const CACHED_URLS = [
     "./",
     "./index.html",
@@ -83,7 +83,17 @@ function cancelAllNotifications() {
     scheduledNotifications.clear();
 }
 
-function scheduleRowNotifications({ rowId, name, respawnTimestamp, leadTimestamp, notificationUrl }) {
+// respawnTimestamp / leadTimestamp 是「本機時鐘基準」，跟這裡的 Date.now() 同一把尺，
+// 所以 setTimeout 的算式不會被網路對時的抖動影響。要顯示的「幾點重生」則由頁面
+// 換算好用 respawnTimeText 傳進來（那才需要對齊現實世界的鐘）。
+function scheduleRowNotifications({
+    rowId,
+    name,
+    respawnTimestamp,
+    leadTimestamp,
+    respawnTimeText,
+    notificationUrl,
+}) {
     cancelRowNotifications(rowId);
 
     const now = Date.now();
@@ -94,7 +104,7 @@ function scheduleRowNotifications({ rowId, name, respawnTimestamp, leadTimestamp
             if (await isPageVisible()) return;
             const secondsLeft = Math.max(0, Math.round((respawnTimestamp - Date.now()) / 1000));
             self.registration.showNotification(`還有 ${secondsLeft} 秒：${name}`, {
-                body: `預計 ${formatTaipeiTime(respawnTimestamp)} 重生。`,
+                body: `預計 ${respawnTimeText || formatTaipeiTime(respawnTimestamp)} 重生。`,
                 icon: "./images/ICON_192.png",
                 badge: "./images/badge.svg",
                 tag: `pikmin-lead-${rowId}`,

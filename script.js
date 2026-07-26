@@ -67,6 +67,11 @@ const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 // 注意：這只是提醒，工具的預測本身有網路對時撐著、不會因為放久了就變差。
 const INPUT_AGE_HINT_MINUTES = 10;
 
+// 「最後校正窗口」：被摧毀前這幾分鐘。摧毀後蘑菇從遊戲裡消失、再也讀不到時間，
+// 所以要重新確認只能趁這段。設 4 分鐘是為了把「輸入 → 重生」的誤差壓在 10 分鐘內
+// （4 分鐘窗口 + 摧毀後 5 分鐘重生等待）。
+const LAST_CALIBRATION_WINDOW_SECONDS = 4 * 60;
+
 // 「最佳開遊戲時機」校正：畫面刷新時間點 = gameLoadSeconds + refreshPeriodSeconds 之後，每 refreshPeriodSeconds 一次
 const DEFAULT_GAME_LOAD_SECONDS = 4;
 const DEFAULT_REFRESH_PERIOD_SECONDS = 8;
@@ -188,8 +193,7 @@ function updateRangeProgress(inputEl, value) {
 
 // --- 網路對時：用 Worker 回傳的伺服器時間校準本機時鐘 ---
 // 工具跑在電腦、遊戲跑在手機，兩個時鐘會慢慢走開。這裡量出「伺服器精確時間
-// 與本機時鐘的差」，之後所有跟倒數/重生有關的時間計算都改用 getAccurateNow()，
-// 讓工具跟遊戲一起對齊到伺服器時間，不受本機時鐘準不準影響。
+// 與本機時鐘的差」，用來把本機時刻換算成真實世界時刻。
 const TIME_SYNC_ENDPOINT = `${WORKER_URL}/api/time`;
 const TIME_SYNC_INTERVAL_MS = 3 * 60 * 1000;
 // 對時被視為「過期」的時間：超過這麼久沒成功對時，指示器就轉為警示。
@@ -200,6 +204,34 @@ let lastTimeSyncOffsetMs = 0; // 上次成功對時量到的本機時鐘偏差
 
 function getAccurateNow() {
     return Date.now() + timeOffsetMs;
+}
+
+// --- 時間基準：兩把尺，別搞混 ---
+//
+// 所有存在 row 上的時刻（targetTimestamp / inputAt / lastRespawnTimestamp）
+// 一律是「本機時鐘基準」，也就是純 Date.now() 的值。
+//
+// 為什麼不存校正後的時刻？因為那會把「凍結當下的 offset」永久烤進去：
+//     顯示剩餘 = (Date.now()_輸入 + offset_輸入 + D) − (Date.now()_現在 + offset_現在)
+//              = (純本機倒數)  +  (offset_輸入 − offset_現在)   ← 後面這項就是誤差
+// offset 每對一次時就抖一次，於是每列都被平移一次，越早輸入的列偏得越多。
+// 尤其頁面剛開、第一次對時還沒回來時輸入的列，會永久帶著整個本機時鐘偏差。
+//
+// 皮克敏那邊是固定期限：看到還有 5 小時，就一定是 5 小時後被摧毀、再 5 分鐘重生。
+// 真值是確定的，所以倒數框裡任何跳動都是工具自己造的雜訊。用同一把尺（本機時鐘）
+// 頭尾相減，那一項誤差就直接消失，而本機時鐘幾小時內的漂移遠小於對時抖動。
+//
+// offset 只在兩個地方才該出現，都用「當下最新」的值，所以對時每改善一次估計就跟著修正：
+//   1. 把時刻換算成幾點幾分顯示（要跟現實的鐘對齊）→ toAbsoluteTime()
+//   2. 排給 Worker / Service Worker 的推播時間（對方活在真實世界時間）→ toAbsoluteTime()
+function toAbsoluteTime(localTimestamp) {
+    return Number.isFinite(localTimestamp) ? localTimestamp + timeOffsetMs : null;
+}
+
+// 本機基準的時刻 → 台北時間字串。顯示用的唯一入口，省得漏掉換算。
+function formatLocalTimestampAsTaipei(localTimestamp) {
+    const absolute = toAbsoluteTime(localTimestamp);
+    return absolute === null ? "—" : formatTaipeiTime(new Date(absolute));
 }
 
 async function syncTimeOffset() {
@@ -310,6 +342,11 @@ function loadRowsFromStorage() {
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
 
+        // 這裡讀出來的時刻一律當成本機時鐘基準（見 toAbsoluteTime 上面那段說明）。
+        // 舊版存的是校正後基準，兩者差一個「當初寫入時的 offset」。載入這一刻還沒對時
+        // （timeOffsetMs 仍是 0），沒有資訊能把那個值反推回來，所以直接照原值讀進來：
+        // 殘留的偏差就等於它本來就烤進去的那個，不會比改版前更糟，而且蘑菇幾小時內
+        // 就會輪替掉，之後全部都是新基準。
         return parsed
             .map((item) => ({
                 name: String(item.name || "").trim(),
@@ -577,11 +614,7 @@ function getReminderTimestamp(row) {
 }
 
 function getRespawnText(row) {
-    const respawnTimestamp = getRespawnTimestamp(row);
-    if (!respawnTimestamp) {
-        return "—";
-    }
-    return formatTaipeiTime(new Date(respawnTimestamp));
+    return formatLocalTimestampAsTaipei(getRespawnTimestamp(row));
 }
 
 function getRemainingSecondsFromTarget(targetTimestamp) {
@@ -589,7 +622,8 @@ function getRemainingSecondsFromTarget(targetTimestamp) {
         return 0;
     }
 
-    const diffMs = targetTimestamp - getAccurateNow();
+    // 本機基準減本機時鐘：同一把尺，對時抖動進不來。
+    const diffMs = targetTimestamp - Date.now();
     return Math.max(0, Math.floor((diffMs + 999) / 1000));
 }
 
@@ -604,7 +638,7 @@ function getSecondsUntilRespawn(row) {
 
 function isRowRespawned(row) {
     const respawnTimestamp = getRespawnTimestamp(row);
-    return Number.isFinite(respawnTimestamp) && respawnTimestamp <= getAccurateNow();
+    return Number.isFinite(respawnTimestamp) && respawnTimestamp <= Date.now();
 }
 
 // 第一次刷新的時間點（開遊戲後幾秒看到那個畫面 + 之後的刷新週期）
@@ -648,7 +682,7 @@ function getMostRecentOptimalOpenCheckpointLead(secondsUntilRespawn) {
 // 「從現在到看到結果的總秒數」——總秒數會因為每次都是假設「這一刻才開」而重新
 // 起算一輪新的刷新排程，導致數字每 8 秒才跳一次、中間 8 秒都不會變。額外等待
 // 秒數則會跟著時間流逝每秒平順遞減，不會卡住不動。
-function getIfOpenNowGapSeconds(respawnTimestamp, now = getAccurateNow()) {
+function getIfOpenNowGapSeconds(respawnTimestamp, now = Date.now()) {
     if (!respawnTimestamp) {
         return null;
     }
@@ -728,6 +762,36 @@ function shouldHighlightBeforeRespawn(row) {
         secondsUntilRespawn > 0 &&
         secondsUntilRespawn <= PRE_RESPAWN_HIGHLIGHT_SECONDS
     );
+}
+
+// 蘑菇已經被摧毀（畫面倒數歸零），遊戲裡看不到它了。
+function isRowDestroyed(row) {
+    return Boolean(row?.targetTimestamp) && row.targetTimestamp <= Date.now();
+}
+
+// 最後校正窗口：摧毀前這幾分鐘。過了這個窗口就再也沒機會從遊戲讀到時間，
+// 所以橘色提醒只在這段閃，倒數還久時不吵、摧毀後閃也沒用。
+function isInLastCalibrationWindow(row) {
+    if (!row?.targetTimestamp || isRowDestroyed(row)) {
+        return false;
+    }
+
+    return (
+        getRemainingSecondsFromTarget(row.targetTimestamp) <=
+        LAST_CALIBRATION_WINDOW_SECONDS
+    );
+}
+
+// 這輪資料是不是在最後校正窗口內取得的（重新確認會把 inputAt 更新成當下）。
+// 有校正過，輸入到重生之間最多差 窗口 + 重生等待，誤差壓得住；
+// 沒有的話，摧毀後就只能照舊資料推算，重生時間可能有偏差。
+function hasCalibratedBeforeDestroy(row) {
+    if (!row?.targetTimestamp || !row.inputAt) {
+        return false;
+    }
+
+    const leadMs = row.targetTimestamp - row.inputAt;
+    return leadMs >= 0 && leadMs <= LAST_CALIBRATION_WINDOW_SECONDS * 1000;
 }
 
 function updateRespawnHighlight(row) {
@@ -1043,7 +1107,7 @@ async function subscribeToPushIfNeeded() {
 function sendWorkerSchedule(row) {
     if (!systemNotificationEnabled || Notification.permission !== "granted") return;
     const respawnTimestamp = getRespawnTimestamp(row);
-    if (!respawnTimestamp || respawnTimestamp <= getAccurateNow()) return;
+    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return;
 
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
@@ -1055,9 +1119,10 @@ function sendWorkerSchedule(row) {
         body: JSON.stringify({
             clientId: getOrCreateClientId(),
             rowId: row.id,
+            // Worker 活在真實世界時間，這裡才把本機基準換算過去（套當下最新的 offset）。
+            respawnTimestamp: toAbsoluteTime(respawnTimestamp),
+            leadTimestamp: leadMs && leadMs > Date.now() ? toAbsoluteTime(leadMs) : null,
             name,
-            respawnTimestamp,
-            leadTimestamp: leadMs && leadMs > getAccurateNow() ? leadMs : null,
         }),
     }).catch((e) => console.warn("無法排程推播", e));
 }
@@ -1091,7 +1156,7 @@ function postToSw(message) {
 function getSwSchedulePayload(row) {
     if (!systemNotificationEnabled || Notification.permission !== "granted") return null;
     const respawnTimestamp = getRespawnTimestamp(row);
-    if (!respawnTimestamp || respawnTimestamp <= getAccurateNow()) return null;
+    if (!respawnTimestamp || respawnTimestamp <= Date.now()) return null;
 
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const leadMs = alertLeadEnabled ? respawnTimestamp - alertLeadSeconds * 1000 : null;
@@ -1100,8 +1165,12 @@ function getSwSchedulePayload(row) {
         type: "SCHEDULE_NOTIFICATION",
         rowId: row.id,
         name,
+        // Service Worker 跟頁面在同一台裝置、共用同一個 Date.now()，
+        // 所以排程時間維持本機基準，setTimeout 的算式才不會被對時抖動影響。
         respawnTimestamp,
-        leadTimestamp: leadMs && leadMs > getAccurateNow() ? leadMs : null,
+        leadTimestamp: leadMs && leadMs > Date.now() ? leadMs : null,
+        // 只有「幾點重生」這行字要跟現實的鐘對齊，在這邊先換算好再送過去。
+        respawnTimeText: formatLocalTimestampAsTaipei(respawnTimestamp),
         notificationUrl: window.location.href,
     };
 }
@@ -1251,8 +1320,9 @@ function syncRowTimer(row) {
     // 使用者一旦開始重新編輯時間，就清除「已重生」保留狀態。
     row.respawnState = false;
     row.lastRespawnTimestamp = null;
-    row.targetTimestamp = totalSeconds > 0 ? getAccurateNow() + totalSeconds * 1000 : null;
-    row.inputAt = row.targetTimestamp ? getAccurateNow() : null;
+    // 用純本機時鐘凍結期限：這個數字之後不會再被任何對時結果動到。
+    row.targetTimestamp = totalSeconds > 0 ? Date.now() + totalSeconds * 1000 : null;
+    row.inputAt = row.targetTimestamp ? Date.now() : null;
 
     resetRowAlertState(row);
     updateRowDisplay(row);
@@ -1324,7 +1394,7 @@ function updateInputAgeDisplay(row) {
 
     if (!row.targetTimestamp || !row.inputAt) {
         el.classList.add("is-hidden");
-        el.classList.remove("is-aged");
+        el.classList.remove("is-aged", "is-uncalibrated");
         textEl.textContent = "";
         if (confirmBtn) confirmBtn.hidden = true;
         wrapper?.classList.remove("is-input-aged");
@@ -1332,23 +1402,40 @@ function updateInputAgeDisplay(row) {
     }
 
     el.classList.remove("is-hidden");
-    const ageMinutes = Math.floor((getAccurateNow() - row.inputAt) / 60000);
+    const ageMinutes = Math.floor((Date.now() - row.inputAt) / 60000);
     const ageText = ageMinutes < 1 ? "剛剛輸入" : `輸入於 ${ageMinutes} 分鐘前`;
     const isAged = ageMinutes >= INPUT_AGE_HINT_MINUTES;
+    const destroyed = isRowDestroyed(row);
+    const inWindow = isInLastCalibrationWindow(row);
 
-    if (isAged) {
+    if (destroyed) {
+        // 摧毀後蘑菇從遊戲裡消失，已經沒得再確認，所以不再叫人去確認，
+        // 只把「這輪到底有沒有校正過」講清楚，讓你知道重生時間可不可以全信。
+        const calibrated = hasCalibratedBeforeDestroy(row);
+        el.classList.remove("is-aged");
+        el.classList.toggle("is-uncalibrated", !calibrated);
+        textEl.textContent = calibrated
+            ? `${ageText}・摧毀前已重新確認過，重生時間可信`
+            : `${ageText}・摧毀前沒有重新確認，重生時間可能有誤差`;
+        if (confirmBtn) confirmBtn.hidden = true;
+    } else if (isAged) {
         el.classList.add("is-aged");
-        textEl.textContent = `${ageText}・要極致精準可重新確認一次`;
+        el.classList.remove("is-uncalibrated");
+        textEl.textContent = inWindow
+            ? `${ageText}・最後校正機會，摧毀後就沒得確認了`
+            : `${ageText}・要極致精準可重新確認一次`;
         if (confirmBtn) confirmBtn.hidden = false;
     } else {
-        el.classList.remove("is-aged");
+        el.classList.remove("is-aged", "is-uncalibrated");
         textEl.textContent = ageText;
         if (confirmBtn) confirmBtn.hidden = true;
     }
 
-    // 橘色高亮閃爍，讓你不用讀字、看到在閃就知道該重新確認。
-    // 但「重生前綠色高亮」更緊急，若同時成立就讓綠色優先、兩者不同時閃。
-    const shouldFlashOrange = isAged && !shouldHighlightBeforeRespawn(row);
+    // 橘色高亮閃爍，讓你不用讀字、看到在閃就知道該去重新確認。
+    // 只在最後校正窗口內閃：倒數還久不用急，摧毀後閃了也補救不了。
+    // 窗口內按過確認就不再閃（inputAt 更新後 isAged 會變 false）。
+    // 摧毀後才會出現的「重生前綠色高亮」跟這裡天生互斥，不必再判一次。
+    const shouldFlashOrange = isAged && inWindow;
     wrapper?.classList.toggle("is-input-aged", shouldFlashOrange);
 }
 
@@ -1359,9 +1446,9 @@ function updateRowDisplay(row) {
 
     if (row.respawnState && !row.targetTimestamp) {
         row.elements.countdownBox.textContent = "00:00:00";
-        row.elements.respawnBox.textContent = row.lastRespawnTimestamp
-            ? formatTaipeiTime(new Date(row.lastRespawnTimestamp))
-            : "—";
+        row.elements.respawnBox.textContent = formatLocalTimestampAsTaipei(
+            row.lastRespawnTimestamp
+        );
         return;
     }
 
@@ -1756,7 +1843,7 @@ function ensureCustomSortButton() {
 
 function sortRowsByRespawnTime(options = {}) {
     const { persistMode = true } = options;
-    const now = getAccurateNow();
+    const now = Date.now();
 
     rows.sort((a, b) => {
         const aRespawn = getRespawnTimestamp(a);
@@ -1817,7 +1904,7 @@ function getRowCopyText(row) {
 }
 
 function getNextUpcomingRow() {
-    const now = getAccurateNow();
+    const now = Date.now();
 
     const upcomingRows = rows.filter((row) => {
         const respawnTimestamp = getRespawnTimestamp(row);
@@ -1838,7 +1925,7 @@ function getOptimalOpenHintText(respawnTimestamp) {
     }
 
     const baseLead = getOptimalOpenLeadSeconds();
-    const rawSecondsUntilRespawn = (respawnTimestamp - getAccurateNow()) / 1000;
+    const rawSecondsUntilRespawn = (respawnTimestamp - Date.now()) / 1000;
 
     if (rawSecondsUntilRespawn <= baseLead) {
         return "現在開啟遊戲！（最後機會，重生前已經沒有更早的對齊時機了）";
@@ -1933,7 +2020,7 @@ function updateNextMushroomCard() {
     const respawnTimestamp = getRespawnTimestamp(nextRow);
     const remainingSeconds = getRemainingSecondsFromTarget(respawnTimestamp);
 
-    const timeText = formatTaipeiTime(new Date(respawnTimestamp));
+    const timeText = formatLocalTimestampAsTaipei(respawnTimestamp);
     const remainText = formatDuration(remainingSeconds);
     const openHintText = getOptimalOpenHintText(respawnTimestamp);
     const openNowDelayText = getOpenNowDelayText(respawnTimestamp);
@@ -2159,7 +2246,7 @@ function playAlertSound(kind) {
 function triggerReminderToast(row, secondsUntilRespawn) {
     const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
     const respawnTimestamp = getRespawnTimestamp(row);
-    const respawnTimeText = formatTaipeiTime(new Date(respawnTimestamp));
+    const respawnTimeText = formatLocalTimestampAsTaipei(respawnTimestamp);
     const openHintText = getOptimalOpenHintText(respawnTimestamp);
 
     hideActiveReminderToast(row);
@@ -2193,7 +2280,7 @@ function triggerLeadSystemNotification(row, secondsUntilRespawn) {
         return;
     }
 
-    const respawnTimeText = formatTaipeiTime(new Date(respawnTimestamp));
+    const respawnTimeText = formatLocalTimestampAsTaipei(respawnTimestamp);
     const openHintText = getOptimalOpenHintText(respawnTimestamp);
     showSystemNotification(
         `還有 ${secondsUntilRespawn} 秒：${name}`,
@@ -2716,7 +2803,7 @@ function addRow(initialData = {}) {
         if (!row.targetTimestamp) {
             return;
         }
-        row.inputAt = getAccurateNow();
+        row.inputAt = Date.now();
         updateRowDisplay(row);
         saveRowsToStorage();
         showToast("已確認資料無誤", "重新計時，橘色提醒先消失。", "info");
