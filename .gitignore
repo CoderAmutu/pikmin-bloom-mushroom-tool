@@ -29,3 +29,7 @@ build/
 
 # Cloudflare Wrangler 本地快取（含帳號資訊，不應上傳）
 .wrangler/
+
+.dev.vars*
+!.dev.vars.example
+!.env.example
