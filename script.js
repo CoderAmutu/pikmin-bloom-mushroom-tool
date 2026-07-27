@@ -63,13 +63,10 @@ const SOON_STATUS_WINDOW_SECONDS = 5 * 60;
 // 想改成重生前幾秒開始高亮，就改這個數字（目前是 10 秒）
 const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 
-// 資料放超過這麼多分鐘才算「舊到值得重新確認」。單獨成立不會提醒，
-// 必須同時落在下面的最後校正窗口內才會催你（見 updateInputAgeDisplay）。
-const INPUT_AGE_HINT_MINUTES = 10;
-
 // 「最後校正窗口」：被摧毀前這幾分鐘。摧毀後蘑菇從遊戲裡消失、再也讀不到時間，
-// 所以要重新確認只能趁這段。設 4 分鐘是為了把「輸入 → 重生」的誤差壓在 10 分鐘內
-// （4 分鐘窗口 + 摧毀後 5 分鐘重生等待）。
+// 所以要重新確認只能趁這段。進了窗口就一律提醒，不管資料多新——這一輪到重生
+// 要跨快 10 分鐘（4 分鐘窗口 + 摧毀後 5 分鐘重生等待），多少會飄一點。
+// 這個數字同時也是「有沒有校正過」的判準：inputAt 落在窗口內就算校正過。
 const LAST_CALIBRATION_WINDOW_SECONDS = 4 * 60;
 
 // 「最佳開遊戲時機」校正：畫面刷新時間點 = gameLoadSeconds + refreshPeriodSeconds 之後，每 refreshPeriodSeconds 一次
@@ -1404,13 +1401,16 @@ function updateInputAgeDisplay(row) {
     el.classList.remove("is-hidden");
     const ageMinutes = Math.floor((Date.now() - row.inputAt) / 60000);
     const ageText = ageMinutes < 1 ? "剛剛輸入" : `輸入於 ${ageMinutes} 分鐘前`;
-    const isAged = ageMinutes >= INPUT_AGE_HINT_MINUTES;
     const destroyed = isRowDestroyed(row);
 
-    // 要不要叫你去重新確認：只在「最後校正窗口內、而且資料已經放很久」才成立。
+    // 要不要叫你去重新確認：進了最後校正窗口就一律提醒，不管資料多新。
+    // 因為這一輪從現在到重生要跨快 10 分鐘（4 分鐘窗口 + 摧毀後 5 分鐘等重生），
+    // 就算剛輸入不久，到重生時也可能飄個一秒，趁還看得到就再讀一次最穩。
     // 窗口外還來得及，現在吵沒意義；摧毀後已經來不及，吵了也補救不了。
-    // 窗口內按過確認就自動解除（inputAt 更新後 isAged 變回 false）。
-    const needsCalibration = isAged && isInLastCalibrationWindow(row);
+    // 解除條件是「這一輪已經在窗口內校正過」——按下確認無誤會把 inputAt 更新成
+    // 當下，隨即落進窗口內，提醒就收起來，不會按了又立刻跳回來。
+    const needsCalibration =
+        isInLastCalibrationWindow(row) && !hasCalibratedBeforeDestroy(row);
 
     if (destroyed) {
         // 摧毀後蘑菇從遊戲裡消失，已經沒得再確認，所以不再叫人去確認，
