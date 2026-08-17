@@ -66,7 +66,7 @@ body {
   z-index: 1;
 }
 
-.floating-next-card,
+.floating-stack,
 .toast-stack {
   z-index: 10;
 }
@@ -565,71 +565,367 @@ button:disabled {
   box-shadow: 0 8px 16px rgba(255, 90, 79, 0.14);
 }
 
-/* 標籤 */
-.tag-list {
+/* 蘑菇大小／種類 */
+
+/* 每種蘑菇一組配色，面板選中的膠囊與各列地點上方的膠囊共用。 */
+/* 活動蘑菇不屬於任何元素，給一條彩色漸層讓它和下面的單色種類一眼分得開。 */
+[data-mushroom-type="活動"] {
+  --kind-bg: linear-gradient(135deg, #fff4dc 0%, #ffe8f3 48%, #e6f1ff 100%);
+  --kind-border: #f2ceac;
+  --kind-text: #9a5b1f;
+}
+
+[data-mushroom-type="火"] {
+  --kind-bg: #fff1ea;
+  --kind-border: #ffc4a6;
+  --kind-text: #b8430f;
+}
+
+[data-mushroom-type="電"] {
+  --kind-bg: #fffae0;
+  --kind-border: #ffe08a;
+  --kind-text: #8a6300;
+}
+
+[data-mushroom-type="水"] {
+  --kind-bg: #e6fbfb;
+  --kind-border: #a8e6e9;
+  --kind-text: #0f6f7d;
+}
+
+[data-mushroom-type="毒"] {
+  --kind-bg: #f3ecff;
+  --kind-border: #cfb8f5;
+  --kind-text: #5b2ea6;
+}
+
+[data-mushroom-type="水晶"] {
+  --kind-bg: #eef6ff;
+  --kind-border: #c4d9ef;
+  --kind-text: #40607d;
+}
+
+[data-mushroom-type="紅"] {
+  --kind-bg: #ffefee;
+  --kind-border: #ffbeb8;
+  --kind-text: #b3352c;
+}
+
+[data-mushroom-type="黃"] {
+  --kind-bg: #fff8d9;
+  --kind-border: #ffdf7a;
+  --kind-text: #8a6200;
+}
+
+[data-mushroom-type="藍"] {
+  --kind-bg: #eaf3ff;
+  --kind-border: #b3d4ff;
+  --kind-text: #14549e;
+}
+
+[data-mushroom-type="紫"] {
+  --kind-bg: #f7ecff;
+  --kind-border: #ddb8ff;
+  --kind-text: #6b21a8;
+}
+
+[data-mushroom-type="白"] {
+  --kind-bg: #fbfbf8;
+  --kind-border: #dcdfd8;
+  --kind-text: #4b5563;
+}
+
+[data-mushroom-type="粉"] {
+  --kind-bg: #fff0f8;
+  --kind-border: #ffc2e2;
+  --kind-text: #b03177;
+}
+
+[data-mushroom-type="灰"] {
+  --kind-bg: #f2f4f6;
+  --kind-border: #d3d9df;
+  --kind-text: #4b5563;
+}
+
+[data-mushroom-type="冰"] {
+  --kind-bg: #ecfbff;
+  --kind-border: #b0e8f7;
+  --kind-text: #1a7d96;
+}
+
+.kind-modal {
+  position: fixed;
+  inset: 0;
+  /* 要壓過浮動的「即將冒出來」小卡（999），但讓提醒 toast（1200）還是蓋得過來。 */
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.kind-modal.is-hidden {
+  display: none;
+}
+
+.kind-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 42, 24, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.kind-modal-card {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 20px 22px;
+  border-radius: 26px;
+  border: 1px solid rgba(214, 231, 211, 0.9);
+  background: var(--card-strong);
+  box-shadow: 0 24px 48px rgba(22, 78, 20, 0.28);
+  animation: kindModalPop 0.18s ease-out;
+}
+
+@keyframes kindModalPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.kind-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kind-modal-heading h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #1d4a2a;
+}
+
+.kind-modal-sub {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.kind-modal-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid #e2e8e0;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kind-modal-close:hover {
+  background: #f4f7f3;
+  box-shadow: none;
+  transform: none;
+}
+
+.kind-modal-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--kind-border, #d9e7d3);
+  background: var(--kind-bg, #f7faf6);
+  color: var(--kind-text, #1d4a2a);
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.kind-modal-preview.is-empty {
+  border-style: dashed;
+  border-color: #d3dcd0;
+  background: transparent;
+  color: #9ab0bf;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.kind-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.kind-modal-actions button {
+  width: 100%;
+  min-height: 46px;
+}
+
+.kind-modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+body.is-modal-open {
+  overflow: hidden;
+}
+
+.kind-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.kind-group-label {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding-top: 9px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #58708a;
+}
+
+.kind-type-wrap {
+  min-width: 0;
+}
+
+.kind-chip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kind-chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.tag-item {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  padding: 4px;
-  border: 1px solid #cdebc8;
-  background: linear-gradient(180deg, #f7fff2 0%, #efffe3 100%);
-  border-radius: 999px;
-  box-shadow: 0 4px 10px rgba(24, 196, 0, 0.08);
+.kind-type-hint {
+  margin: 8px 0 0;
+  color: #8a6200;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
-.tag-chip {
-  min-height: 32px;
-  border: none;
-  background: transparent;
-  color: #2b7a2b;
+.kind-type-hint.is-hidden {
+  display: none;
+}
+
+.kind-chip {
+  min-height: 36px;
+  min-width: 44px;
+  padding: 6px 14px;
   border-radius: 999px;
-  padding: 6px 16px 6px 10px;
+  border: 1px solid #d9e7d3;
+  background: #ffffff;
+  color: #58708a;
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
   transition:
     transform 0.18s ease,
-    background 0.18s ease;
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
 }
 
-.tag-chip:hover {
-  background: rgba(255, 255, 255, 0.55);
+/* emoji 用固定字級，不跟著膠囊字重變形；被鎖住時跟著整顆膠囊變灰。 */
+.kind-chip-icon {
+  margin-right: 3px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.kind-chip:hover {
   transform: translateY(-1px);
+  border-color: var(--kind-border, #b8ddad);
   box-shadow: none;
 }
 
-.tag-remove-btn {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
-  padding: 0;
-  border-radius: 999px;
-  border: 2px solid #ffffff;
-  background: #e94552;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 6px 14px rgba(233, 69, 82, 0.24);
-  transform: none;
+.kind-chip.is-active {
+  background: var(--kind-bg, #eefbe9);
+  border-color: var(--kind-border, #a8d99a);
+  color: var(--kind-text, #2b7a2b);
+  box-shadow: inset 0 0 0 1px var(--kind-border, #a8d99a);
 }
 
-.tag-remove-btn:hover {
-  background: #d63a48;
-  box-shadow: 0 8px 16px rgba(233, 69, 82, 0.28);
+/* 大小鎖住種類時（巨大、小），整排種類變灰。被鎖但仍選中的「活動」保留配色，
+   讓人看得出來現在是什麼，只是不能改。 */
+.kind-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.kind-chip:disabled:hover {
+  transform: none;
+  border-color: #d9e7d3;
+}
+
+.kind-chip.is-active:disabled {
+  opacity: 0.75;
+}
+
+.kind-chip.is-active:disabled:hover {
+  border-color: var(--kind-border, #a8d99a);
+}
+
+/* 各列地點欄上方那顆膠囊：顯示這一列選了什麼，點一下開 modal 重選。 */
+.mushroom-kind-chip {
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--kind-border, #d9e7d3);
+  background: var(--kind-bg, #ffffff);
+  color: var(--kind-text, #58708a);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.mushroom-kind-chip:hover {
+  transform: none;
+  box-shadow: 0 4px 10px rgba(34, 80, 24, 0.1);
+}
+
+.mushroom-kind-chip.is-empty {
+  border-style: dashed;
+  border-color: #d3dcd0;
+  background: transparent;
+  color: #9ab0bf;
+  font-weight: 700;
 }
 
 .empty-tags {
@@ -1208,13 +1504,28 @@ input:focus {
   }
 }
 
-.floating-next-card {
+/* 兩張浮動卡片放同一個直向堆疊裡，才不會各自 fixed 疊在一起。 */
+.floating-stack {
   position: fixed;
   right: 20px;
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   z-index: 999;
   width: 280px;
   max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  /* 卡片之間的空隙不要擋住底下的按鈕 */
+  pointer-events: none;
+}
+
+.floating-stack > * {
+  pointer-events: auto;
+}
+
+.floating-next-card {
+  width: 100%;
   padding: 14px 16px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.96);
@@ -1222,6 +1533,96 @@ input:focus {
   box-shadow: 0 14px 30px rgba(22, 78, 20, 0.18);
   backdrop-filter: blur(10px);
   display: none;
+}
+
+/* 校正卡片是橘色的，跟整列橘色高亮同一個語彙；而且不管捲到哪都顯示。 */
+.floating-calibration-card {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 20px;
+  background: rgba(255, 250, 242, 0.97);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow:
+    0 0 0 3px rgba(245, 158, 11, 0.12),
+    0 14px 30px rgba(180, 83, 9, 0.22);
+  backdrop-filter: blur(10px);
+  animation: calibrationCardPulse 1.6s ease-in-out infinite;
+}
+
+.floating-calibration-card.is-hidden {
+  display: none;
+}
+
+@keyframes calibrationCardPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(245, 158, 11, 0.12),
+      0 14px 30px rgba(180, 83, 9, 0.22);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 6px rgba(245, 158, 11, 0.2),
+      0 14px 30px rgba(180, 83, 9, 0.28);
+  }
+}
+
+.floating-calibration-title {
+  font-size: 13px;
+  font-weight: 900;
+  color: #b45309;
+  margin-bottom: 8px;
+}
+
+.floating-calibration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.floating-calibration-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(255, 255, 255, 0.75);
+  color: #92400e;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: left;
+  cursor: pointer;
+}
+
+.floating-calibration-item:hover {
+  background: #ffffff;
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: none;
+  transform: none;
+}
+
+.floating-calibration-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-calibration-item-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.floating-calibration-more {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 700;
+  padding-left: 2px;
 }
 
 .floating-next-card.is-visible {
@@ -1261,7 +1662,7 @@ input:focus {
 }
 
 @media (max-width: 980px) {
-  .floating-next-card {
+  .floating-stack {
     right: 12px;
     left: 12px;
     bottom: 12px;
@@ -1270,7 +1671,7 @@ input:focus {
 }
 
 @media (max-width: 640px) {
-  .floating-next-card {
+  .floating-stack {
     left: 12px;
     right: 12px;
     width: auto;
@@ -1561,18 +1962,45 @@ input:focus {
     width: 100%;
   }
 
-  .tag-list {
-    gap: 8px;
+  /* 手機上讓 modal 貼著底部，單手就按得到。 */
+  .kind-modal {
+    align-items: flex-end;
+    padding: 0;
   }
 
-  .tag-item {
-    max-width: 100%;
+  .kind-modal-card {
+    width: 100%;
+    max-height: 86vh;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 26px 26px 0 0;
   }
 
-  .tag-chip {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .kind-group {
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .kind-group-label {
+    padding-top: 0;
+  }
+
+  .kind-chip-list,
+  .kind-chip-row {
+    gap: 6px;
+  }
+
+  .kind-chip {
+    flex: 1 1 auto;
+    min-height: 42px;
+  }
+
+  /* 種類窄螢幕改用五欄格線：顏色那列 8 顆會排成 5＋3 並靠左對齊，
+     不會出現最後一顆自己撐滿一整行的怪樣子；「活動」也剛好佔一格。 */
+  #kind-type-list .kind-chip-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .row-list {
@@ -1635,9 +2063,9 @@ input:focus {
     gap: 10px;
   }
 
-  .row-actions .btn-add-tag {
-    width: 100%;
-    min-height: 46px;
+  .mushroom-kind-chip {
+    min-height: 32px;
+    padding: 5px 14px;
   }
 
   .row-actions-bottom {
@@ -1671,11 +2099,15 @@ input:focus {
     margin-top: 10px;
   }
 
-  .floating-next-card {
+  .floating-stack {
     right: 12px;
     left: 12px;
     bottom: 12px;
     width: auto;
+  }
+
+  .floating-next-card,
+  .floating-calibration-card {
     padding: 12px 14px;
     border-radius: 18px;
   }
@@ -1785,7 +2217,6 @@ body {
     min-width: 0;
   }
 
-  .row-actions .btn-add-tag,
   .row-actions .btn-outline {
     width: 100%;
   }

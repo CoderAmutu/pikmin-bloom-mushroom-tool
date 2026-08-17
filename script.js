@@ -2,7 +2,16 @@ const rowList = document.getElementById("row-list");
 const addRowBtn = document.getElementById("add-row-btn");
 const taipeiNowEl = document.getElementById("taipei-now");
 const footerTimeEl = document.getElementById("footer-time");
-const tagListEl = document.getElementById("tag-list");
+const kindModalEl = document.getElementById("kind-modal");
+const kindModalBackdropEl = document.getElementById("kind-modal-backdrop");
+const kindModalCloseBtn = document.getElementById("kind-modal-close");
+const kindModalSubEl = document.getElementById("kind-modal-sub");
+const kindModalPreviewEl = document.getElementById("kind-modal-preview");
+const kindSizeListEl = document.getElementById("kind-size-list");
+const kindTypeListEl = document.getElementById("kind-type-list");
+const kindTypeHintEl = document.getElementById("kind-type-hint");
+const kindClearBtn = document.getElementById("kind-clear-btn");
+const kindDoneBtn = document.getElementById("kind-done-btn");
 const sortBtn = document.getElementById("sort-btn");
 const bottomSortBtn = document.getElementById("bottom-sort-btn");
 const copyAllBtn = document.getElementById("copy-all-btn");
@@ -37,7 +46,6 @@ const WORKER_URL = "https://pikmin-push-worker.amutu-lab.workers.dev";
 const VAPID_PUBLIC_KEY = "BECUpa1WhUmi9zqG6LCB6t_sXG0A8i_nU2kMd5npj5zRHWGWw9xXwZPPouxPOZzhxnCpS3BUH7wY4bSenxsuhvU";
 const CLIENT_ID_STORAGE_KEY = "pikmin-mushroom-client-id";
 
-const TAGS_STORAGE_KEY = "pikmin-mushroom-tags";
 const ROWS_STORAGE_KEY = "pikmin-mushroom-rows";
 const ALERT_SECONDS_STORAGE_KEY = "pikmin-mushroom-alert-seconds";
 const ALERT_ENABLED_STORAGE_KEY = "pikmin-mushroom-alert-enabled";
@@ -47,6 +55,76 @@ const ALERT_VOLUME_STORAGE_KEY = "pikmin-mushroom-alert-volume";
 const SORT_MODE_STORAGE_KEY = "pikmin-mushroom-sort-mode";
 const PROFILES_STORAGE_KEY = "pikmin-mushroom-profiles";
 const OPTIMAL_OPEN_STORAGE_KEY = "pikmin-mushroom-optimal-open-settings";
+
+// 蘑菇大小／種類：只是記錄用的標記，完全不影響倒數與重生推算。特殊蘑菇常有人趕在
+// 被摧毀前才進去，時間會有誤差，標起來就知道哪幾顆的數字要抓寬一點。
+const MUSHROOM_SIZES = ["小", "一般", "大", "巨大"];
+
+// 種類分三組：活動 / 屬性 / 顏色。這個順序同時也是 modal 裡的三列排法。
+const MUSHROOM_TYPE_GROUPS = [
+    { key: "event", types: ["活動"] },
+    { key: "element", types: ["火", "電", "水", "毒", "水晶"] },
+    { key: "color", types: ["紅", "黃", "藍", "紫", "白", "粉", "灰", "冰"] },
+];
+const MUSHROOM_TYPES = MUSHROOM_TYPE_GROUPS.flatMap((group) => group.types);
+
+const ALL_TYPE_GROUP_KEYS = MUSHROOM_TYPE_GROUPS.map((group) => group.key);
+
+// 純顯示用。存進 localStorage 的一律是「火」這種原始字串，不要把 emoji 寫進資料裡。
+const MUSHROOM_TYPE_ICONS = {
+    活動: "🎉",
+    火: "🔥",
+    電: "⚡",
+    水: "💧",
+    毒: "☠️",
+    水晶: "💎",
+};
+
+function getMushroomTypeIcon(type) {
+    return MUSHROOM_TYPE_ICONS[type] || "";
+}
+
+// 遊戲規則：哪個大小能配哪幾組種類。forcedType 是選了那個大小就自動帶入的種類。
+// 要跟著遊戲改規則，動這張表就好。
+const MUSHROOM_SIZE_RULES = {
+    小: {
+        groups: ["color"],
+        hint: "小蘑菇只有顏色，沒有屬性也不會是活動。",
+    },
+    一般: {
+        groups: ALL_TYPE_GROUP_KEYS,
+        hint: "",
+    },
+    大: {
+        groups: ["element", "color"],
+        hint: "活動蘑菇只有一般與巨大，沒有大。",
+    },
+    巨大: {
+        groups: ["event"],
+        forcedType: "活動",
+        hint: "巨大蘑菇只會在活動出現，種類固定為活動。",
+    },
+};
+
+// 還沒選大小時不限制，種類隨便挑。
+const MUSHROOM_SIZE_RULE_ANY = { groups: ALL_TYPE_GROUP_KEYS, hint: "" };
+
+function getSizeRule(size) {
+    return MUSHROOM_SIZE_RULES[size] || MUSHROOM_SIZE_RULE_ANY;
+}
+
+function getTypeGroupKey(type) {
+    const group = MUSHROOM_TYPE_GROUPS.find((item) => item.types.includes(type));
+    return group ? group.key : null;
+}
+
+function isTypeAllowedForSize(type, size) {
+    if (!type) {
+        return true;
+    }
+
+    return getSizeRule(size).groups.includes(getTypeGroupKey(type));
+}
 
 const SORT_MODE_RESPAWN = "respawn";
 const SORT_MODE_CUSTOM = "custom";
@@ -69,6 +147,13 @@ const PRE_RESPAWN_HIGHLIGHT_SECONDS = 10;
 // 這個數字同時也是「有沒有校正過」的判準：inputAt 落在窗口內就算校正過。
 const LAST_CALIBRATION_WINDOW_SECONDS = 4 * 60;
 
+// 進了最後校正窗口要主動叫人，不能只靠那一列自己閃橘色——清單一長、又照重生時間
+// 排序，正在窗口內的那列常常捲在畫面外，等發現時已經被摧毀了。
+// 這兩個是「剩幾秒時響一次」：一進窗口先響，剩一分鐘再補最後一次。
+const CALIBRATION_ALERT_STAGES = [LAST_CALIBRATION_WINDOW_SECONDS, 60];
+// 浮動卡片最多列幾筆，超過的用「還有 N 筆」帶過，免得卡片長到蓋住整個畫面。
+const MAX_FLOATING_CALIBRATION_ITEMS = 3;
+
 // 「最佳開遊戲時機」校正：畫面刷新時間點 = gameLoadSeconds + refreshPeriodSeconds 之後，每 refreshPeriodSeconds 一次
 const DEFAULT_GAME_LOAD_SECONDS = 4;
 const DEFAULT_REFRESH_PERIOD_SECONDS = 8;
@@ -82,9 +167,13 @@ const floatingNextNameEl = document.getElementById("floating-next-name");
 const floatingNextTimeEl = document.getElementById("floating-next-time");
 const floatingNextOpenHintEl = document.getElementById("floating-next-open-hint");
 const floatingNextOpenNowDelayEl = document.getElementById("floating-next-open-now-delay");
+const floatingCalibrationCardEl = document.getElementById("floating-calibration-card");
+const floatingCalibrationTitleEl = document.getElementById("floating-calibration-title");
+const floatingCalibrationListEl = document.getElementById("floating-calibration-list");
 
 const rows = [];
-let tags = [];
+// 大小／種類 modal 目前在編輯哪一列，關起來時是 null。
+let kindModalRow = null;
 let profiles = {};
 let activeProfileName = null;
 let rowCreatedSeq = 0;
@@ -112,9 +201,13 @@ function createRowData(createdSeq) {
         customOrder: finalCreatedSeq,
         targetTimestamp: null,
         inputAt: null,
+        mushroomSize: null,
+        mushroomType: null,
         respawnState: false,
         lastRespawnTimestamp: null,
         respawnTriggered: false,
+        // 這一輪的校正提醒已經響到第幾階段（對應 CALIBRATION_ALERT_STAGES 的長度）
+        calibrationAlertStage: 0,
         lastReminderBucket: null,
         leadAlertDismissed: false,
         activeReminderToast: null,
@@ -307,28 +400,12 @@ function formatTaipeiTime(date) {
     }).format(date);
 }
 
-function loadTagsFromStorage() {
-    try {
-        const raw = localStorage.getItem(TAGS_STORAGE_KEY);
-        if (!raw) return [];
-
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-
-        return parsed
-            .map((item) => String(item).trim())
-            .filter((item) => item.length > 0);
-    } catch {
-        return [];
-    }
+function sanitizeMushroomSize(value) {
+    return MUSHROOM_SIZES.includes(value) ? value : null;
 }
 
-function saveTagsToStorage() {
-    try {
-        localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tags));
-    } catch {
-        // ignore
-    }
+function sanitizeMushroomType(value) {
+    return MUSHROOM_TYPES.includes(value) ? value : null;
 }
 
 function loadRowsFromStorage() {
@@ -350,6 +427,8 @@ function loadRowsFromStorage() {
                 targetTimestamp:
                     typeof item.targetTimestamp === "number" ? item.targetTimestamp : null,
                 inputAt: typeof item.inputAt === "number" ? item.inputAt : null,
+                mushroomSize: sanitizeMushroomSize(item.mushroomSize),
+                mushroomType: sanitizeMushroomType(item.mushroomType),
                 respawnState: item.respawnState === true,
                 lastRespawnTimestamp:
                     typeof item.lastRespawnTimestamp === "number"
@@ -364,6 +443,8 @@ function loadRowsFromStorage() {
                 (item) =>
                     item.name !== "" ||
                     item.targetTimestamp !== null ||
+                    item.mushroomSize !== null ||
+                    item.mushroomType !== null ||
                     item.respawnState === true ||
                     typeof item.createdSeq === "number" ||
                     typeof item.customOrder === "number"
@@ -379,6 +460,8 @@ function saveRowsToStorage() {
             name: row.elements.nameInput.value.trim(),
             targetTimestamp: row.targetTimestamp,
             inputAt: row.inputAt,
+            mushroomSize: row.mushroomSize,
+            mushroomType: row.mushroomType,
             respawnState: row.respawnState === true,
             lastRespawnTimestamp: row.lastRespawnTimestamp,
             createdSeq: row.createdSeq,
@@ -779,6 +862,27 @@ function isInLastCalibrationWindow(row) {
     );
 }
 
+// 這一列現在是不是「該去重新確認」：在窗口內、還沒被摧毀、這輪也還沒校正過。
+// 橘色高亮、浮動卡片、聲音提醒三邊都看這個，判斷才不會各說各話。
+function needsCalibrationNow(row) {
+    return isInLastCalibrationWindow(row) && !hasCalibratedBeforeDestroy(row);
+}
+
+// 依「還有多久被摧毀」排序，最急的排前面。
+function getRowsNeedingCalibration() {
+    return rows
+        .filter(needsCalibrationNow)
+        .sort((a, b) => a.targetTimestamp - b.targetTimestamp);
+}
+
+function getSecondsUntilDestroy(row) {
+    if (!row?.targetTimestamp) {
+        return null;
+    }
+
+    return getRemainingSecondsFromTarget(row.targetTimestamp);
+}
+
 // 這輪資料是不是在最後校正窗口內取得的（重新確認會把 inputAt 更新成當下）。
 // 有校正過，輸入到重生之間最多差 窗口 + 重生等待，誤差壓得住；
 // 沒有的話，摧毀後就只能照舊資料推算，重生時間可能有偏差。
@@ -967,6 +1071,8 @@ function applyProfile(name) {
         `確定要套用「${name}」設定檔嗎？\n目前的地點清單與計時器都會被清除。`
     );
     if (!confirmed) return;
+
+    closeKindModal();
 
     rows.forEach((row) => {
         hideActiveReminderToast(row);
@@ -1258,6 +1364,15 @@ function resetRowAlertState(row, options = {}) {
     const respawned = isRowRespawned(row);
 
     row.respawnTriggered = secondsUntilRespawn === null ? true : respawned;
+
+    // 新的一輪時間＝新的校正機會，提醒階段跟著歸零。alignToCurrentWindow 是還原
+    // 既有資料（重整、排序）時用的：直接對齊現在的階段，才不會一開頁面就補響一輪。
+    row.calibrationAlertStage = alignToCurrentWindow
+        ? CALIBRATION_ALERT_STAGES.filter(
+              (threshold) => (getSecondsUntilDestroy(row) ?? Infinity) <= threshold
+          ).length
+        : 0;
+
     row.lastReminderBucket =
         alignToCurrentWindow && !respawned
             ? getLeadReminderBucket(secondsUntilRespawn)
@@ -1409,8 +1524,7 @@ function updateInputAgeDisplay(row) {
     // 窗口外還來得及，現在吵沒意義；摧毀後已經來不及，吵了也補救不了。
     // 解除條件是「這一輪已經在窗口內校正過」——按下確認無誤會把 inputAt 更新成
     // 當下，隨即落進窗口內，提醒就收起來，不會按了又立刻跳回來。
-    const needsCalibration =
-        isInLastCalibrationWindow(row) && !hasCalibratedBeforeDestroy(row);
+    const needsCalibration = needsCalibrationNow(row);
 
     if (destroyed) {
         // 摧毀後蘑菇從遊戲裡消失，已經沒得再確認，所以不再叫人去確認，
@@ -1493,88 +1607,228 @@ function flashButton(button, text) {
     }, 1200);
 }
 
-function getLatestCreatedRow() {
-    if (rows.length === 0) {
+// 「巨大」＋「火」→「巨大火蘑菇」。只選一半也能組出名字，兩邊都沒選就回傳 null。
+function formatMushroomKindName(size, type) {
+    if (!size && !type) {
         return null;
     }
 
-    return rows.reduce((latest, current) => {
-        if (!latest) return current;
-        return current.createdSeq > latest.createdSeq ? current : latest;
-    }, null);
+    return `${size || ""}${type || ""}蘑菇`;
 }
 
-function renderTags() {
-    tagListEl.innerHTML = "";
+function getRowMushroomKindName(row) {
+    return formatMushroomKindName(row.mushroomSize, row.mushroomType);
+}
 
-    if (tags.length === 0) {
-        const emptyEl = document.createElement("div");
-        emptyEl.className = "empty-tags";
-        emptyEl.textContent = "目前還沒有標籤";
-        tagListEl.appendChild(emptyEl);
-        return;
+// 顯示在膠囊與預覽帶上的字串：屬性蘑菇前面掛個 emoji，掃一眼就分得出來。
+function getRowMushroomKindLabel(row) {
+    const kindName = getRowMushroomKindName(row);
+    if (!kindName) {
+        return null;
     }
 
-    tags.forEach((tagName) => {
-        const tagItem = document.createElement("div");
-        tagItem.className = "tag-item";
+    const icon = getMushroomTypeIcon(row.mushroomType);
+    return icon ? `${icon} ${kindName}` : kindName;
+}
 
-        const tagBtn = document.createElement("button");
-        tagBtn.type = "button";
-        tagBtn.className = "tag-chip";
-        tagBtn.textContent = tagName;
+function updateRowKindChip(row) {
+    const chip = row.elements && row.elements.kindChip;
+    if (!chip) return;
 
-        tagBtn.addEventListener("click", () => {
-            const latestRow = getLatestCreatedRow();
-            if (!latestRow) return;
+    const kindLabel = getRowMushroomKindLabel(row);
 
-            latestRow.elements.nameInput.value = tagName;
-            latestRow.elements.nameInput.focus();
-            updateNextMushroomCard();
-            saveRowsToStorage();
+    chip.textContent = kindLabel || "未選擇大小／種類";
+    chip.classList.toggle("is-empty", !kindLabel);
+    chip.title = "點一下選擇蘑菇大小／種類";
+
+    if (row.mushroomType) {
+        chip.dataset.mushroomType = row.mushroomType;
+    } else {
+        delete chip.dataset.mushroomType;
+    }
+}
+
+// rowsOfValues 是二維陣列，每個子陣列自成一列（種類要分活動／元素／顏色三列）。
+function buildKindChipList(listEl, rowsOfValues, groupKey) {
+    if (!listEl) return;
+
+    listEl.innerHTML = "";
+
+    rowsOfValues.forEach((values) => {
+        const rowEl = document.createElement("div");
+        rowEl.className = "kind-chip-row";
+
+        values.forEach((value) => {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "kind-chip";
+            chip.dataset.kindValue = value;
+            chip.dataset.kindGroup = groupKey;
+
+            const icon = groupKey === "mushroomType" ? getMushroomTypeIcon(value) : "";
+            if (icon) {
+                const iconEl = document.createElement("span");
+                iconEl.className = "kind-chip-icon";
+                iconEl.textContent = icon;
+                chip.append(iconEl, document.createTextNode(value));
+            } else {
+                chip.textContent = value;
+            }
+
+            if (groupKey === "mushroomType") {
+                chip.dataset.mushroomType = value;
+            }
+
+            chip.addEventListener("click", () => {
+                applyMushroomKind(groupKey, value);
+            });
+
+            rowEl.appendChild(chip);
         });
 
-        const removeTagBtn = document.createElement("button");
-        removeTagBtn.type = "button";
-        removeTagBtn.className = "tag-remove-btn";
-        removeTagBtn.setAttribute("aria-label", `刪除標籤 ${tagName}`);
-        removeTagBtn.textContent = "×";
-
-        removeTagBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-
-            const confirmed = window.confirm(`確定要刪除標籤「${tagName}」嗎？`);
-            if (!confirmed) return;
-
-            removeTag(tagName);
-        });
-
-        tagItem.append(tagBtn, removeTagBtn);
-        tagListEl.appendChild(tagItem);
+        listEl.appendChild(rowEl);
     });
 }
 
-function addTag(name) {
-    const trimmedName = name.trim();
-    if (!trimmedName) return;
+// 再點一次同一個選項＝取消它，不用另外找清除鍵。
+function applyMushroomKind(groupKey, value) {
+    if (!kindModalRow) return;
 
-    const existedIndex = tags.findIndex((tag) => tag === trimmedName);
-    if (existedIndex !== -1) {
-        tags.splice(existedIndex, 1);
+    const nextValue = kindModalRow[groupKey] === value ? null : value;
+
+    if (groupKey === "mushroomType" && !isTypeAllowedForSize(value, kindModalRow.mushroomSize)) {
+        return;
     }
 
-    tags.unshift(trimmedName);
-    saveTagsToStorage();
-    renderTags();
+    kindModalRow[groupKey] = nextValue;
+
+    // 改了大小就順手把種類調成合法值：巨大自動跳到活動，其餘配不起來的直接清掉。
+    if (groupKey === "mushroomSize") {
+        const { forcedType } = getSizeRule(nextValue);
+
+        if (forcedType) {
+            kindModalRow.mushroomType = forcedType;
+        } else if (!isTypeAllowedForSize(kindModalRow.mushroomType, nextValue)) {
+            kindModalRow.mushroomType = null;
+        }
+    }
+
+    saveRowsToStorage();
+    updateRowKindChip(kindModalRow);
+    syncKindModal();
 }
 
-function removeTag(name) {
-    const index = tags.findIndex((tag) => tag === name);
-    if (index === -1) return;
+function clearMushroomKind() {
+    if (!kindModalRow) return;
 
-    tags.splice(index, 1);
-    saveTagsToStorage();
-    renderTags();
+    if (!kindModalRow.mushroomSize && !kindModalRow.mushroomType) {
+        return;
+    }
+
+    kindModalRow.mushroomSize = null;
+    kindModalRow.mushroomType = null;
+
+    saveRowsToStorage();
+    updateRowKindChip(kindModalRow);
+    syncKindModal();
+}
+
+function syncKindModal() {
+    if (!kindModalRow) return;
+
+    if (kindModalSubEl) {
+        const name = kindModalRow.elements.nameInput.value.trim();
+        const index = rows.indexOf(kindModalRow);
+        kindModalSubEl.textContent = `地點：${name || `第 ${index + 1} 筆（未命名）`}`;
+    }
+
+    const sizeRule = getSizeRule(kindModalRow.mushroomSize);
+
+    [kindSizeListEl, kindTypeListEl].forEach((listEl) => {
+        if (!listEl) return;
+
+        Array.from(listEl.querySelectorAll(".kind-chip")).forEach((chip) => {
+            const isActive =
+                kindModalRow[chip.dataset.kindGroup] === chip.dataset.kindValue;
+            chip.classList.toggle("is-active", isActive);
+            chip.setAttribute("aria-pressed", String(isActive));
+
+            if (chip.dataset.kindGroup === "mushroomType") {
+                chip.disabled = !isTypeAllowedForSize(
+                    chip.dataset.kindValue,
+                    kindModalRow.mushroomSize
+                );
+            }
+        });
+    });
+
+    if (kindTypeHintEl) {
+        kindTypeHintEl.textContent = sizeRule.hint;
+        kindTypeHintEl.classList.toggle("is-hidden", !sizeRule.hint);
+    }
+
+    const kindName = getRowMushroomKindLabel(kindModalRow);
+
+    if (kindModalPreviewEl) {
+        kindModalPreviewEl.textContent = kindName || "未選擇大小／種類";
+        kindModalPreviewEl.classList.toggle("is-empty", !kindName);
+
+        if (kindModalRow.mushroomType) {
+            kindModalPreviewEl.dataset.mushroomType = kindModalRow.mushroomType;
+        } else {
+            delete kindModalPreviewEl.dataset.mushroomType;
+        }
+    }
+
+    if (kindClearBtn) {
+        kindClearBtn.disabled = !kindName;
+    }
+}
+
+function openKindModal(row) {
+    if (!kindModalEl || !row) return;
+
+    kindModalRow = row;
+    syncKindModal();
+    kindModalEl.classList.remove("is-hidden");
+    document.body.classList.add("is-modal-open");
+
+    if (kindDoneBtn) {
+        kindDoneBtn.focus();
+    }
+}
+
+function closeKindModal() {
+    if (!kindModalEl) return;
+
+    kindModalRow = null;
+    kindModalEl.classList.add("is-hidden");
+    document.body.classList.remove("is-modal-open");
+}
+
+function initMushroomKindModal() {
+    buildKindChipList(kindSizeListEl, [MUSHROOM_SIZES], "mushroomSize");
+    buildKindChipList(
+        kindTypeListEl,
+        MUSHROOM_TYPE_GROUPS.map((group) => group.types),
+        "mushroomType"
+    );
+
+    if (kindClearBtn) {
+        kindClearBtn.addEventListener("click", clearMushroomKind);
+    }
+
+    [kindDoneBtn, kindModalCloseBtn, kindModalBackdropEl].forEach((el) => {
+        if (el) {
+            el.addEventListener("click", closeKindModal);
+        }
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && kindModalRow) {
+            closeKindModal();
+        }
+    });
 }
 
 function normalizeCustomOrders() {
@@ -2049,6 +2303,85 @@ function updateNextMushroomCard() {
     }
 }
 
+// 浮動「該重新確認」卡片。跟「即將冒出來」那張不同，它不管捲到哪都會出現——
+// 會漏掉就是因為那一列捲在畫面外，只在捲動後才顯示就失去意義了。
+let floatingCalibrationKey = "";
+
+function updateFloatingCalibrationCard() {
+    if (!floatingCalibrationCardEl || !floatingCalibrationListEl) {
+        return;
+    }
+
+    const needyRows = getRowsNeedingCalibration();
+
+    if (needyRows.length === 0) {
+        floatingCalibrationCardEl.classList.add("is-hidden");
+        floatingCalibrationListEl.innerHTML = "";
+        floatingCalibrationKey = "";
+        return;
+    }
+
+    floatingCalibrationCardEl.classList.remove("is-hidden");
+
+    if (floatingCalibrationTitleEl) {
+        floatingCalibrationTitleEl.textContent =
+            needyRows.length > 1 ? `⚠ 該重新確認（${needyRows.length}）` : "⚠ 該重新確認";
+    }
+
+    const shownRows = needyRows.slice(0, MAX_FLOATING_CALIBRATION_ITEMS);
+
+    // 名單沒變就只更新倒數字，不要每 200ms 重建一次 DOM（重建會吃掉點擊）。
+    const key = shownRows.map((row) => row.id).join("|") + `/${needyRows.length}`;
+
+    if (key !== floatingCalibrationKey) {
+        floatingCalibrationKey = key;
+        floatingCalibrationListEl.innerHTML = "";
+
+        shownRows.forEach((row) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "floating-calibration-item";
+            item.dataset.rowId = row.id;
+
+            const nameEl = document.createElement("span");
+            nameEl.className = "floating-calibration-item-name";
+
+            const timeEl = document.createElement("span");
+            timeEl.className = "floating-calibration-item-time";
+
+            item.append(nameEl, timeEl);
+            item.addEventListener("click", () => {
+                row.elements.wrapper.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                });
+            });
+
+            floatingCalibrationListEl.appendChild(item);
+        });
+
+        if (needyRows.length > shownRows.length) {
+            const moreEl = document.createElement("div");
+            moreEl.className = "floating-calibration-more";
+            moreEl.textContent = `還有 ${needyRows.length - shownRows.length} 筆`;
+            floatingCalibrationListEl.appendChild(moreEl);
+        }
+    }
+
+    shownRows.forEach((row, index) => {
+        const item = floatingCalibrationListEl.children[index];
+        if (!item) return;
+
+        const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+        item.querySelector(".floating-calibration-item-name").textContent = name;
+        item.querySelector(".floating-calibration-item-time").textContent =
+            formatDuration(getSecondsUntilDestroy(row) ?? 0);
+        item.title = `${name}：再 ${formatDuration(
+            getSecondsUntilDestroy(row) ?? 0
+        )} 被摧毀，點一下跳到那一列`;
+    });
+}
+
 function updateFloatingNextCardVisibility() {
     if (!floatingNextCardEl) return;
 
@@ -2239,6 +2572,15 @@ function playAlertSound(kind) {
         return;
     }
 
+    // 校正提醒故意用「下行」音，跟重生那組上行音一聽就分得開：
+    // 上行＝要冒出來了，下行＝快消失了，趁現在。
+    if (kind === "calibration") {
+        playTone(startAt, 784, 0.18, 0.055);
+        playTone(startAt + 0.22, 587, 0.2, 0.06);
+        playTone(startAt + 0.46, 494, 0.26, 0.06);
+        return;
+    }
+
     playTone(startAt, 784, 0.14, 0.05);
     playTone(startAt + 0.18, 988, 0.16, 0.055);
 }
@@ -2268,6 +2610,24 @@ function triggerReminderToast(row, secondsUntilRespawn) {
                     row.activeReminderToast = null;
                 }
             },
+        }
+    );
+}
+
+function triggerCalibrationToast(row, secondsUntilDestroy) {
+    const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
+    const isFinalCall = secondsUntilDestroy <= 60;
+
+    playAlertSound("calibration");
+    showToast(
+        `${isFinalCall ? "⚠ 最後機會" : "⚠ 該重新確認"}：${name}`,
+        `再 ${formatDuration(secondsUntilDestroy)} 就被摧毀，趁現在回遊戲讀一次剩餘時間。\n摧毀後就沒得確認，重生時間會有誤差。`,
+        "warning",
+        {
+            // 比重生提醒停久一點：這種提醒錯過就真的沒了，不像重生還會再輪一次。
+            durationMs: 9000,
+            shake: true,
+            closable: true,
         }
     );
 }
@@ -2452,7 +2812,34 @@ async function applySystemNotificationEnabled(value, { silent = false } = {}) {
     return true;
 }
 
+// 進了最後校正窗口就出聲＋跳提醒。分兩階段響（進窗口、剩一分鐘），中間不重複吵，
+// 已經按過「確認無誤」的就完全不響。
+function checkCalibrationAlerts() {
+    rows.forEach((row) => {
+        if (!needsCalibrationNow(row)) {
+            return;
+        }
+
+        const secondsUntilDestroy = getSecondsUntilDestroy(row);
+        if (secondsUntilDestroy === null) {
+            return;
+        }
+
+        // 落在第幾階段：剩餘秒數每跨過一個門檻就多一階。
+        const stage = CALIBRATION_ALERT_STAGES.filter(
+            (threshold) => secondsUntilDestroy <= threshold
+        ).length;
+
+        if (stage > row.calibrationAlertStage) {
+            row.calibrationAlertStage = stage;
+            triggerCalibrationToast(row, secondsUntilDestroy);
+        }
+    });
+}
+
 function checkAndFireAlerts() {
+    checkCalibrationAlerts();
+
     rows.forEach((row) => {
         const secondsUntilRespawn = getSecondsUntilRespawn(row);
 
@@ -2649,6 +3036,10 @@ function addRow(initialData = {}) {
 
     const nameField = document.createElement("div");
     nameField.className = "field";
+    const kindChip = document.createElement("button");
+    kindChip.type = "button";
+    kindChip.className = "mushroom-kind-chip is-empty";
+    kindChip.textContent = "未選擇大小／種類";
     const nameLabelRow = document.createElement("div");
     nameLabelRow.className = "field-label-row";
     const nameLabel = document.createElement("label");
@@ -2661,7 +3052,7 @@ function addRow(initialData = {}) {
     nameInput.type = "text";
     nameInput.placeholder = "例如：台北世家中庭帷幕";
     nameInput.value = initialData.name || "";
-    nameField.append(nameLabelRow, nameInput);
+    nameField.append(kindChip, nameLabelRow, nameInput);
 
     const timeField = document.createElement("div");
     timeField.className = "field";
@@ -2706,10 +3097,6 @@ function addRow(initialData = {}) {
     const actionField = document.createElement("div");
     actionField.className = "row-actions";
 
-    const addTagBtn = document.createElement("button");
-    addTagBtn.className = "btn-outline btn-add-tag";
-    addTagBtn.textContent = "加入標籤";
-
     const rowMoveControls = document.createElement("div");
     rowMoveControls.className = "row-actions-bottom";
 
@@ -2739,7 +3126,7 @@ function addRow(initialData = {}) {
     removeBtn.textContent = "刪除";
 
     rowActionsBottom.append(copyBtn, removeBtn);
-    actionField.append(addTagBtn, rowMoveControls, rowActionsBottom);
+    actionField.append(rowMoveControls, rowActionsBottom);
 
     rowMain.append(nameField, timeField, countdownField, respawnField, inputAgeEl);
     wrapper.append(indexEl, rowMain, actionField);
@@ -2759,7 +3146,7 @@ function addRow(initialData = {}) {
         inputAgeText,
         confirmAgeBtn,
         statusBadge,
-        addTagBtn,
+        kindChip,
         moveControls: rowMoveControls,
         moveUpBtn,
         moveDownBtn,
@@ -2775,6 +3162,8 @@ function addRow(initialData = {}) {
         row.targetTimestamp && typeof initialData.inputAt === "number"
             ? initialData.inputAt
             : null;
+    row.mushroomSize = sanitizeMushroomSize(initialData.mushroomSize);
+    row.mushroomType = sanitizeMushroomType(initialData.mushroomType);
     row.respawnState = initialData.respawnState === true;
     row.lastRespawnTimestamp =
         typeof initialData.lastRespawnTimestamp === "number"
@@ -2795,6 +3184,10 @@ function addRow(initialData = {}) {
     nameInput.addEventListener("input", () => {
         updateNextMushroomCard();
         saveRowsToStorage();
+    });
+
+    kindChip.addEventListener("click", () => {
+        openKindModal(row);
     });
 
     // 「確認無誤」：不用重新輸入時間，只把「上次確認時間」更新成現在，
@@ -2839,12 +3232,6 @@ function addRow(initialData = {}) {
         });
     });
 
-    addTagBtn.addEventListener("click", () => {
-        const name = row.elements.nameInput.value.trim() || "未命名蘑菇";
-        addTag(name);
-        flashButton(addTagBtn, "已加入");
-    });
-
     copyBtn.addEventListener("click", async () => {
         const text = getRowCopyText(row);
         if (!text) {
@@ -2862,6 +3249,11 @@ function addRow(initialData = {}) {
         }
 
         rows.splice(index, 1);
+
+        if (kindModalRow === row) {
+            closeKindModal();
+        }
+
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
         postToSw({ type: "CANCEL_NOTIFICATION", rowId: row.id });
@@ -2881,6 +3273,7 @@ function addRow(initialData = {}) {
     });
 
     rows.push(row);
+    updateRowKindChip(row);
 
     if (currentSortMode === SORT_MODE_CUSTOM) {
         sortRowsByCustomOrder({ persistMode: false });
@@ -2917,6 +3310,8 @@ function clearAllRows() {
         return;
     }
 
+    closeKindModal();
+
     rows.forEach((row) => {
         hideActiveReminderToast(row);
         clearRespawnHighlight(row);
@@ -2948,6 +3343,7 @@ function tick() {
     rows.forEach(updateRowDisplay);
     checkAndFireAlerts();
     updateNextMushroomCard();
+    updateFloatingCalibrationCard();
     updateTimeSyncIndicator();
 }
 
@@ -3161,8 +3557,7 @@ applyAlertLeadSeconds(alertLeadSeconds, { silent: true });
 applyAlertVolume(alertVolume, { silent: true });
 applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
 applyOptimalOpenSettings(optimalOpenSettings, { silent: true });
-tags = loadTagsFromStorage();
-renderTags();
+initMushroomKindModal();
 profiles = loadProfilesFromStorage();
 renderProfiles();
 restoreRowsFromStorage();

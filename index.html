@@ -45,20 +45,6 @@
         </div>
       </div>
 
-      <div class="panel tag-panel">
-        <div class="panel-header panel-header-compact">
-          <div>
-            <h2>地點標籤</h2>
-            <p>
-              單筆按「加入標籤」後會記住地點。點一下標籤，可直接填入最新新增那一列。
-            </p>
-          </div>
-        </div>
-        <div class="tag-list" id="tag-list">
-          <div class="empty-tags" id="empty-tags">目前還沒有標籤</div>
-        </div>
-      </div>
-
       <div class="panel profile-panel">
         <div class="panel-header panel-header-compact">
           <div>
@@ -207,12 +193,76 @@
       <div class="sync-status is-pending" id="sync-status">⏳ 對時中…</div>
     </div>
 
-    <div class="floating-next-card" id="floating-next-card">
-      <div class="floating-next-title">即將冒出來的蘑菇</div>
-      <div class="floating-next-name" id="floating-next-name">地點：—</div>
-      <div class="floating-next-time" id="floating-next-time">重生：—（—）</div>
-      <div class="floating-next-open-hint" id="floating-next-open-hint">建議開遊戲：—</div>
-      <div class="floating-next-open-now-delay" id="floating-next-open-now-delay">現在開啟：—</div>
+    <div class="floating-stack">
+      <div class="floating-calibration-card is-hidden" id="floating-calibration-card">
+        <div class="floating-calibration-title" id="floating-calibration-title">
+          ⚠ 該重新確認
+        </div>
+        <div class="floating-calibration-list" id="floating-calibration-list"></div>
+      </div>
+
+      <div class="floating-next-card" id="floating-next-card">
+        <div class="floating-next-title">即將冒出來的蘑菇</div>
+        <div class="floating-next-name" id="floating-next-name">地點：—</div>
+        <div class="floating-next-time" id="floating-next-time">重生：—（—）</div>
+        <div class="floating-next-open-hint" id="floating-next-open-hint">建議開遊戲：—</div>
+        <div class="floating-next-open-now-delay" id="floating-next-open-now-delay">現在開啟：—</div>
+      </div>
+    </div>
+
+    <div class="kind-modal is-hidden" id="kind-modal">
+      <div class="kind-modal-backdrop" id="kind-modal-backdrop"></div>
+      <div
+        class="kind-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="kind-modal-title"
+      >
+        <div class="kind-modal-header">
+          <div class="kind-modal-heading">
+            <h3 id="kind-modal-title">蘑菇大小／種類</h3>
+            <p class="kind-modal-sub" id="kind-modal-sub">地點：—</p>
+          </div>
+          <button
+            class="kind-modal-close"
+            id="kind-modal-close"
+            type="button"
+            aria-label="關閉"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="kind-group">
+          <div class="kind-group-label">大小</div>
+          <div class="kind-chip-list" id="kind-size-list"></div>
+        </div>
+
+        <div class="kind-group">
+          <div class="kind-group-label">種類</div>
+          <div class="kind-type-wrap">
+            <div class="kind-chip-list" id="kind-type-list"></div>
+            <p class="kind-type-hint is-hidden" id="kind-type-hint"></p>
+          </div>
+        </div>
+
+        <div class="kind-modal-preview" id="kind-modal-preview">
+          未選擇大小／種類
+        </div>
+
+        <div class="kind-modal-actions">
+          <button
+            class="btn-outline btn-danger-soft"
+            id="kind-clear-btn"
+            type="button"
+          >
+            清除
+          </button>
+          <button class="btn-primary" id="kind-done-btn" type="button">
+            完成
+          </button>
+        </div>
+      </div>
     </div>
 
     <div
