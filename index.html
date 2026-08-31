@@ -176,7 +176,32 @@
           </div>
         </div>
 
+        <div class="row-search" id="row-search">
+          <span class="row-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="text"
+            id="row-search-input"
+            class="row-search-input"
+            placeholder="搜尋地點名稱…"
+            autocomplete="off"
+            aria-label="搜尋地點名稱"
+          />
+          <button
+            type="button"
+            class="row-search-clear is-hidden"
+            id="row-search-clear"
+            aria-label="清除搜尋"
+          >
+            ×
+          </button>
+          <span class="row-search-count" id="row-search-count"></span>
+        </div>
+
         <div class="row-list" id="row-list"></div>
+
+        <div class="row-search-empty is-hidden" id="row-search-empty">
+          找不到符合的地點
+        </div>
       </div>
 
       <div class="bottom-actions">
@@ -207,6 +232,33 @@
         <div class="floating-next-time" id="floating-next-time">重生：—（—）</div>
         <div class="floating-next-open-hint" id="floating-next-open-hint">建議開遊戲：—</div>
         <div class="floating-next-open-now-delay" id="floating-next-open-now-delay">現在開啟：—</div>
+      </div>
+
+      <div class="floating-search" id="floating-search">
+        <div class="floating-search-panel" id="floating-search-panel">
+          <div class="floating-search-field">
+            <span class="floating-search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="text"
+              id="floating-search-input"
+              class="floating-search-input"
+              placeholder="搜尋地點名稱…"
+              autocomplete="off"
+              aria-label="搜尋地點名稱"
+            />
+            <button
+              type="button"
+              class="floating-search-clear is-hidden"
+              id="floating-search-clear"
+              aria-label="清除搜尋"
+            >
+              ×
+            </button>
+          </div>
+          <div class="floating-search-count" id="floating-search-count">
+            Enter 可跳到第一筆符合的地點
+          </div>
+        </div>
       </div>
     </div>
 

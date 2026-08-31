@@ -35,6 +35,15 @@ const alertVolumeInput = document.getElementById("alert-volume-input");
 const alertVolumeTextEl = document.getElementById("alert-volume-text");
 const toastStackEl = document.getElementById("toast-stack");
 const syncStatusEl = document.getElementById("sync-status");
+const rowSearchInput = document.getElementById("row-search-input");
+const rowSearchClearBtn = document.getElementById("row-search-clear");
+const rowSearchCountEl = document.getElementById("row-search-count");
+const rowSearchEmptyEl = document.getElementById("row-search-empty");
+const rowSearchBarEl = document.getElementById("row-search");
+const floatingSearchEl = document.getElementById("floating-search");
+const floatingSearchInput = document.getElementById("floating-search-input");
+const floatingSearchClearBtn = document.getElementById("floating-search-clear");
+const floatingSearchCountEl = document.getElementById("floating-search-count");
 
 let customSortBtn = null;
 let deferredInstallPrompt = null;
@@ -184,6 +193,7 @@ let systemNotificationEnabled = loadSystemNotificationEnabled();
 let alertVolume = loadAlertVolume();
 let currentSortMode = loadSortMode();
 let optimalOpenSettings = loadOptimalOpenSettings();
+let rowSearchQuery = "";
 let audioContext = null;
 let audioUnlocked = false;
 let audioHintShown = false;
@@ -1578,6 +1588,221 @@ function updateRowDisplay(row) {
     row.elements.respawnBox.textContent = getRespawnText(row);
 }
 
+// —— 地點搜尋 ——
+// 只是「畫面上的篩選」，不影響倒數、提醒與即將冒出來的蘑菇判斷。
+function normalizeSearchText(text) {
+    return String(text || "").trim().toLowerCase();
+}
+
+function getRowSearchTokens() {
+    const query = normalizeSearchText(rowSearchQuery);
+    if (!query) {
+        return [];
+    }
+
+    return query.split(/\s+/).filter(Boolean);
+}
+
+function rowMatchesSearchTokens(row, tokens) {
+    if (tokens.length === 0) {
+        return true;
+    }
+
+    const name = normalizeSearchText(row.elements.nameInput.value);
+    if (!name) {
+        return false;
+    }
+
+    return tokens.every((token) => name.includes(token));
+}
+
+function applyRowSearchFilter() {
+    if (!rowSearchInput) {
+        return;
+    }
+
+    const tokens = getRowSearchTokens();
+    const searching = tokens.length > 0;
+    let matchedCount = 0;
+
+    rows.forEach((row) => {
+        const { wrapper, nameInput } = row.elements;
+        const matched = rowMatchesSearchTokens(row, tokens);
+
+        if (matched) {
+            matchedCount += 1;
+        }
+
+        // 正在打字的那一列先留著，免得打到一半整列消失。
+        const keepVisible = matched || !searching || wrapper.contains(document.activeElement);
+
+        wrapper.classList.toggle("is-filtered-out", !keepVisible);
+        wrapper.classList.toggle("is-search-hit", searching && matched);
+        nameInput.classList.toggle("is-search-hit", searching && matched);
+    });
+
+    if (rowSearchClearBtn) {
+        rowSearchClearBtn.classList.toggle("is-hidden", rowSearchQuery === "");
+    }
+
+    if (rowSearchCountEl) {
+        rowSearchCountEl.textContent = searching
+            ? `符合 ${matchedCount} / ${rows.length} 筆`
+            : "";
+    }
+
+    if (rowSearchEmptyEl) {
+        rowSearchEmptyEl.classList.toggle("is-hidden", !searching || matchedCount > 0);
+        if (searching && matchedCount === 0) {
+            rowSearchEmptyEl.textContent = `找不到符合「${rowSearchQuery.trim()}」的地點`;
+        }
+    }
+
+    updateFloatingSearchUI(searching, matchedCount);
+    updateFloatingSearchVisibility();
+}
+
+function updateFloatingSearchUI(searching, matchedCount) {
+    if (floatingSearchInput && floatingSearchInput.value !== rowSearchQuery) {
+        floatingSearchInput.value = rowSearchQuery;
+    }
+
+    if (floatingSearchClearBtn) {
+        floatingSearchClearBtn.classList.toggle("is-hidden", rowSearchQuery === "");
+    }
+
+    if (floatingSearchCountEl) {
+        floatingSearchCountEl.textContent = searching
+            ? `符合 ${matchedCount} / ${rows.length} 筆${matchedCount > 0 ? "（Enter 跳到第一筆）" : ""}`
+            : "Enter 可跳到第一筆符合的地點";
+    }
+}
+
+function getFirstSearchMatchRow() {
+    const tokens = getRowSearchTokens();
+    if (tokens.length === 0) {
+        return null;
+    }
+
+    return rows.find((row) => rowMatchesSearchTokens(row, tokens)) || null;
+}
+
+function scrollToFirstSearchMatch() {
+    const row = getFirstSearchMatchRow();
+    if (!row) {
+        return false;
+    }
+
+    row.elements.wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
+    return true;
+}
+
+// 捲到看不到上面那條搜尋列時，右下角才浮出來；回到上面就收起來，不擋畫面。
+function isFloatingSearchFocused() {
+    return Boolean(
+        floatingSearchEl && floatingSearchEl.contains(document.activeElement)
+    );
+}
+
+function updateFloatingSearchVisibility() {
+    if (!floatingSearchEl || !rowSearchBarEl) {
+        return;
+    }
+
+    // 正在用浮動搜尋打字時，就算上面那條搜尋列跑進畫面也不能把它藏起來。
+    // （篩掉列之後整頁會變短，捲動位置被瀏覽器拉回上面，
+    //   這時若跟著隱藏，游標會消失、字就接不下去。）
+    if (isFloatingSearchFocused()) {
+        floatingSearchEl.classList.add("is-visible");
+        return;
+    }
+
+    const rect = rowSearchBarEl.getBoundingClientRect();
+    const barOutOfView = rect.bottom < 8 || rect.top > window.innerHeight - 8;
+
+    floatingSearchEl.classList.toggle("is-visible", barOutOfView);
+}
+
+function setRowSearchQuery(value) {
+    rowSearchQuery = String(value || "");
+
+    if (rowSearchInput && rowSearchInput.value !== rowSearchQuery) {
+        rowSearchInput.value = rowSearchQuery;
+    }
+
+    applyRowSearchFilter();
+}
+
+function initRowSearch() {
+    if (rowSearchInput) {
+        rowSearchInput.addEventListener("input", () => {
+            setRowSearchQuery(rowSearchInput.value);
+        });
+
+        rowSearchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                scrollToFirstSearchMatch();
+                return;
+            }
+
+            if (event.key === "Escape" && rowSearchInput.value !== "") {
+                event.preventDefault();
+                setRowSearchQuery("");
+            }
+        });
+
+        if (rowSearchClearBtn) {
+            rowSearchClearBtn.addEventListener("click", () => {
+                setRowSearchQuery("");
+                rowSearchInput.focus();
+            });
+        }
+    }
+
+    if (floatingSearchInput) {
+        floatingSearchInput.addEventListener("input", () => {
+            setRowSearchQuery(floatingSearchInput.value);
+        });
+
+        floatingSearchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                scrollToFirstSearchMatch();
+                return;
+            }
+
+            if (event.key === "Escape" && floatingSearchInput.value !== "") {
+                event.preventDefault();
+                setRowSearchQuery("");
+            }
+        });
+    }
+
+    if (floatingSearchClearBtn) {
+        floatingSearchClearBtn.addEventListener("click", () => {
+            setRowSearchQuery("");
+            if (floatingSearchInput) {
+                floatingSearchInput.focus();
+            }
+        });
+    }
+
+    if (floatingSearchEl) {
+        floatingSearchEl.addEventListener("focusout", () => {
+            // 等焦點真的落定（可能是移到清除鈕）再判斷，避免點按鈕時被收掉。
+            setTimeout(() => {
+                if (!isFloatingSearchFocused()) {
+                    updateFloatingSearchVisibility();
+                }
+            }, 0);
+        });
+    }
+
+    applyRowSearchFilter();
+    updateFloatingSearchVisibility();
+}
+
 function updateIndices() {
     normalizeCustomOrders();
 
@@ -1585,6 +1810,38 @@ function updateIndices() {
         row.elements.indexEl.textContent = `${index + 1}.`;
         row.elements.removeBtn.disabled = rows.length === 1;
     });
+
+    applyRowSearchFilter();
+}
+
+// 數字輸入框在「有游標」時，滾輪會直接加減數字。
+// 這裡把第一格滾動吃掉並讓輸入框失焦，之後就只是單純捲動畫面，不會改到剛輸入好的秒數。
+function preventWheelNumberChange(input) {
+    if (!input || input.dataset.noWheelSpin === "1") {
+        return input;
+    }
+
+    input.dataset.noWheelSpin = "1";
+    input.addEventListener(
+        "wheel",
+        (event) => {
+            if (document.activeElement !== input) {
+                return;
+            }
+
+            event.preventDefault();
+            input.blur();
+        },
+        { passive: false }
+    );
+
+    return input;
+}
+
+function preventWheelNumberChangeForAllNumberInputs() {
+    document
+        .querySelectorAll('input[type="number"]')
+        .forEach((input) => preventWheelNumberChange(input));
 }
 
 function createNumberInput(placeholder) {
@@ -1594,6 +1851,7 @@ function createNumberInput(placeholder) {
     input.step = "1";
     input.placeholder = placeholder;
     input.inputMode = "numeric";
+    preventWheelNumberChange(input);
     return input;
 }
 
@@ -3018,8 +3276,13 @@ function applyOptimalOpenSettings(partial, { silent = false } = {}) {
 
 ensureCustomSortButton();
 
-window.addEventListener("scroll", updateFloatingNextCardVisibility);
+window.addEventListener("scroll", () => {
+    updateFloatingNextCardVisibility();
+    updateFloatingSearchVisibility();
+});
+window.addEventListener("resize", updateFloatingSearchVisibility);
 updateFloatingNextCardVisibility();
+updateFloatingSearchVisibility();
 
 function addRow(initialData = {}) {
     const row = createRowData(initialData.createdSeq);
@@ -3183,7 +3446,13 @@ function addRow(initialData = {}) {
 
     nameInput.addEventListener("input", () => {
         updateNextMushroomCard();
+        applyRowSearchFilter();
         saveRowsToStorage();
+    });
+
+    // 離開輸入框時再篩一次：打字期間被暫留的列，這時才真的收起來。
+    nameInput.addEventListener("blur", () => {
+        applyRowSearchFilter();
     });
 
     kindChip.addEventListener("click", () => {
@@ -3525,6 +3794,8 @@ function updateAlertVolumeUIValueOnly(value) {
 }
 
 addRowBtn.addEventListener("click", () => {
+    // 搜尋中新增的空白列會被篩掉，所以先把搜尋條件清掉再新增。
+    setRowSearchQuery("");
     addRow();
 });
 
@@ -3558,6 +3829,8 @@ applyAlertVolume(alertVolume, { silent: true });
 applySystemNotificationEnabled(systemNotificationEnabled, { silent: true });
 applyOptimalOpenSettings(optimalOpenSettings, { silent: true });
 initMushroomKindModal();
+initRowSearch();
+preventWheelNumberChangeForAllNumberInputs();
 profiles = loadProfilesFromStorage();
 renderProfiles();
 restoreRowsFromStorage();

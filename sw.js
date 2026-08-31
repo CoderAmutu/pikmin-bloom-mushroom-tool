@@ -1,4 +1,4 @@
-const CACHE_NAME = "pikmin-mushroom-v3";
+const CACHE_NAME = "pikmin-mushroom-v4";
 const CACHED_URLS = [
     "./",
     "./index.html",

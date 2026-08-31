@@ -997,6 +997,126 @@ body.is-modal-open {
   border-radius: 12px;
 }
 
+/* 地點搜尋 */
+.row-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 0 14px;
+  min-height: 48px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #d7e4ef;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.row-search:focus-within {
+  border-color: var(--leaf-green);
+  box-shadow: 0 0 0 4px var(--leaf-green-focus);
+}
+
+.row-search-icon {
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+/* 用 .row-search 前綴壓過下面 input[type="text"] 的通用外框樣式 */
+.row-search .row-search-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 44px;
+  border: none;
+  outline: none;
+  background: transparent;
+  border-radius: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  padding: 0;
+}
+
+.row-search .row-search-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.row-search .row-search-input::placeholder {
+  color: #9bb0c4;
+  font-weight: 600;
+}
+
+.row-search-clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #e7eff7;
+  color: #58708a;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.row-search-clear:hover {
+  background: #d8e5f1;
+}
+
+.row-search-clear.is-hidden {
+  display: none;
+}
+
+.row-search-count {
+  flex: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.row-search-empty {
+  margin-top: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--border-soft);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.row-search-empty.is-hidden {
+  display: none;
+}
+
+.mushroom-row.is-filtered-out {
+  display: none;
+}
+
+.mushroom-row.is-search-hit {
+  border-color: rgba(77, 163, 255, 0.55);
+  box-shadow:
+    0 0 0 3px rgba(77, 163, 255, 0.14),
+    0 8px 18px rgba(34, 80, 24, 0.08);
+}
+
+.mushroom-row .field input[type="text"].is-search-hit {
+  border-color: rgba(77, 163, 255, 0.55);
+  background: #f2f8ff;
+}
+
+@media (max-width: 640px) {
+  .row-search-count {
+    display: none;
+  }
+}
+
 /* 清單 */
 .row-list {
   display: flex;
@@ -1628,6 +1748,96 @@ input:focus {
 .floating-next-card.is-visible {
   display: block;
 }
+
+/* 右下角的浮動搜尋：捲離上面那條搜尋列時才出現 */
+.floating-search {
+  display: none;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.floating-search.is-visible {
+  display: flex;
+}
+
+.floating-search-panel {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 14px 30px rgba(22, 78, 20, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.floating-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.floating-search-icon {
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+/* 用 .floating-search 前綴壓過通用的 input[type="text"] 外框樣式 */
+.floating-search .floating-search-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.floating-search .floating-search-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.floating-search .floating-search-input::placeholder {
+  color: #9bb0c4;
+  font-weight: 600;
+}
+
+.floating-search-clear {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #e7eff7;
+  color: #58708a;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.floating-search-clear:hover {
+  background: #d8e5f1;
+}
+
+.floating-search-clear.is-hidden {
+  display: none;
+}
+
+.floating-search-count {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
 
 .floating-next-title {
   font-size: 13px;
